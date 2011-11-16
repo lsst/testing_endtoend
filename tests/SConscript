@@ -1,0 +1,13 @@
+# -*- python -*-
+Import("env")
+import glob
+	
+#
+# Tests
+#
+import lsst.tests
+
+ignoreList=[]
+tests = lsst.tests.Control(env, ignoreList=ignoreList, verbose=True)
+
+tests.run("*.py")
