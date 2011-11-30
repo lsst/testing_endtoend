@@ -57,7 +57,7 @@ class RunConfiguration(object):
     collection = "PT1.2"
     inputBase = "/lsst3/weekly/data"
     # outputBase = "/lsst3/weekly/datarel-runs"
-    outputBase = "/home/jbosch/datarel-runs"
+    outputBase = "/home/ktlim/datarel-runs"
     lockBase = os.path.join(outputBase, "locks")
     pipelinePolicy = "PT1Pipe/main-ImSim.paf"
     runIdPattern = "%(runType)s_%(datetime)s"
@@ -100,9 +100,6 @@ class RunConfiguration(object):
             self.report(os.path.join(self.options.output,
                 self.options.report, "run", "run.log"))
             sys.exit(0)
-        if self.options.errorReport is not None:
-            print self.errorReport(self.options.errorReport)
-            sys.exit(0)
         if self.options.listInputs:
             self.listInputs()
             sys.exit(0)
@@ -138,7 +135,7 @@ class RunConfiguration(object):
         self.inputDirectory = os.path.join(self.inputBase,
                 RunConfiguration.collection)
         self.outputDirectory = os.path.join(self.options.output, self.runId)
-        self.outputDirectory = abspath(self.outputDirectory)
+        self.outputDirectory = os.path.abspath(self.outputDirectory)
         if os.path.exists(self.outputDirectory):
             raise RuntimeError("Output directory %s already exists" %
                     (self.outputDirectory,))
@@ -150,7 +147,8 @@ class RunConfiguration(object):
         self.setups = dict()
         for product in e.getSetupProducts():
             if product.name != "eups":
-                self.setups[product.name] = product.version
+                self.setups[product.name] = \
+                        re.sub(r'^LOCAL:', "-r ", product.version)
 
         # TODO -- load policy and apply overrides
         self.options.override = None
@@ -709,10 +707,11 @@ workflow: {
         import MySQLdb
         from lsst.daf.persistence import DbAuth
         jobStartRegex = re.compile(
-                r"Processing job: type=calexp "
-                "sensor=(?P<sensor>\d,\d) "
-                "visit=(?P<visit>\d+) "
-                "raft=(?P<raft>\d,\d)"
+                r"Processing job: "
+                r"raft=(?P<raft>\d,\d) "
+                r"sensor=(?P<sensor>\d,\d) "
+                r"type=calexp "
+                r"visit=(?P<visit>\d+)"
         )
 
         host = RunConfiguration.dbHost
@@ -783,10 +782,10 @@ workflow: {
                     WHEN 4 THEN 'calexp writes'
                 END AS descr, COUNT(*) FROM (
                     SELECT CASE
-                        WHEN COMMENT LIKE 'Processing job:% visit=0 %'
+                        WHEN COMMENT LIKE 'Processing job:% visit=0'
                         THEN 1
                         WHEN COMMENT LIKE 'Processing job:%'
-                            AND COMMENT NOT LIKE '% visit=0 %'
+                            AND COMMENT NOT LIKE '% visit=0'
                         THEN 2
                         WHEN COMMENT LIKE 'Ending write to BoostStorage%/src%'
                         THEN 3
@@ -842,62 +841,6 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
             """)
             result += "%s failures seen\n" % cursor.fetchone()
 
-        finally:
-            conn.close()
-        return result
-
-    def errorReport(self, runId):
-        import MySQLdb
-        from lsst.daf.persistence import DbAuth
-        jobStartRegex = re.compile(
-                r"Processing job: type=calexp "
-                "sensor=(?P<sensor>\d,\d) "
-                "visit=(?P<visit>\d+) "
-                "raft=(?P<raft>\d,\d)"
-        )
-
-        host = RunConfiguration.dbHost
-        port = 3306
-        with MySQLdb.connect(
-                host=host,
-                port=port,
-                user=DbAuth.username(host, str(port)),
-                passwd=DbAuth.password(host, str(port))) as conn:
-            runpat = '%' + runId + '%'
-            conn.execute("SHOW DATABASES LIKE %s", (runpat,))
-            ret = conn.fetchall()
-            if ret is None or len(ret) == 0:
-                raise NoMatchError("No match for run %s" % (runId,))
-            elif len(ret) > 1:
-                raise RuntimeError("Multiple runs match:\n" +
-                        str([r[0] for r in ret]))
-            dbName = ret[0][0]
-
-        result = ""
-        try:
-            conn = MySQLdb.connect(
-                host=host,
-                port=port,
-                user=DbAuth.username(host, str(port)),
-                passwd=DbAuth.password(host, str(port)),
-                db=dbName)
-
-            cursor = conn.cursor()
-            cursor.execute("""SELECT TIMESTAMP, timereceived FROM Logs
-                WHERE id = (SELECT MIN(id) FROM Logs)""")
-            row = cursor.fetchone()
-            if row is None:
-                return "*** No log entries written\n"
-
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT workerid, COMMENT
-                FROM Logs JOIN
-                (SELECT MAX(id) AS last FROM Logs GROUP BY workerid) AS a
-                ON (Logs.id = a.last)""")
-            for worker, msg in cursor.fetchall():
-                result += "Pipeline %s last status: %s\n" % (worker, msg)
-
             cursor = conn.cursor(MySQLdb.cursors.DictCursor)
             cursor.execute("""
                 SELECT * FROM Logs
@@ -929,11 +872,11 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
                             match.group("sensor"))
                 elif not d['COMMENT'].startswith('Processing job:'):
                     if jobs.has_key(d['workerid']):
-                        result += "*** Error in %s on %s:\n" % (
-                                jobs[d['workerid']], d['workerid'])
+                        job = jobs[d['workerid']]
                     else:
-                        result += "*** Error in unknown job on %s:\n" % (
-                                d['workerid'],)
+                        job = "unknown"
+                    result += "*** Error in %s in stage %s on %s:\n" % (
+                                job, d['stagename'], d['workerid'])
                     lines = d['COMMENT'].split('\n')
                     i = -1
                     message = lines[i].strip()
@@ -945,6 +888,32 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
 
         finally:
             conn.close()
+
+        outputDir = os.path.join(self.options.output, runId)
+        logFile = os.path.join(outputDir, "run", "unifiedPipeline.log")
+        with open(logFile, "r") as log:
+            try:
+                log.seek(-500, 2)
+            except:
+                pass 
+            tail = log.read(500)
+            if not tail.endswith("logger handled...and...done!\n"):
+                result += "*** Unified pipeline log file\n"
+                result += "(last 500 bytes)... " + tail + "\n"
+
+        for logFile in glob.glob(
+                os.path.join(outputDir, "work", "*", "launch.log")):
+            with open(logFile, "r") as log:
+                try:
+                    log.seek(-500, 2)
+                except:
+                    pass
+                tail = log.read(500)
+                if not re.search(r"harness.runPipeline: workerid \w+$", tail) \
+                        and tail != "done. Now starting job office\n":
+                    result += "*** " + logFile + "\n"
+                    result += "(last 500 bytes)... " + tail + "\n"
+
         return result
 
 ###############################################################################
@@ -994,8 +963,6 @@ Uses the current stack and setup package versions.""")
                 help="print current run status and exit")
         parser.add_option("-R", "--report", metavar="RUNID",
                 help="print report for RUNID and exit")
-        parser.add_option("-E", "--errorReport", metavar="RUNID",
-                help="print error report for RUNID and exit")
         parser.add_option("-k", "--kill", metavar="RUNID",
                 help="kill Orca processes and exit")
         
