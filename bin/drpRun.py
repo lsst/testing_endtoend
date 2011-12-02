@@ -296,8 +296,9 @@ Overrides: %s
             self._log("Orca run complete")
             self._sendmail("[drpRun] Orca done: run %s" % (self.runId,),
                     self.analyzeLogs(self.runId))
-            self.setupCheck()
+
             # TODO -- check that at least two calexps and srcs were created
+            self.setupCheck()
             self.doAdditionalJobs()
             self._log("SourceAssociation and ingest complete")
             if self.options.doPipeQa:
@@ -313,9 +314,15 @@ Overrides: %s
             else:
                 self._sendmail("[drpRun] Complete: run %s" %
                         (self.runId,), self.runInfo)
+
+        except:
+            self._log("*** Exception in run")
+            self._sendmail("[drpRun] Aborted: run %s" % (self.runId,),
+                    self.runInfo)
+            raise
+
         finally:
             self.unlockMachines()
-
 
 ###############################################################################
 # 
@@ -585,9 +592,15 @@ workflow: {
             # TODO -- monitor orca run, looking for output changes
             # TODO -- look for MemoryErrors and bad_allocs in logs
         except subprocess.CalledProcessError:
-            print >>sys.stderr, "*** Orca failed"
+            self._log("*** Orca failed")
             print >>sys.stderr, self.orcaStatus(self.runId,
                     self.outputDirectory)
+            raise
+        except KeyboardInterrupt:
+            self._log("*** Orca interrupted")
+            subprocess.check_call(
+                    "$CTRL_ORCA_DIR/bin/shutprod.py 1 " + self.runId,
+                    shell=True)
             raise
 
     def setupCheck(self):
