@@ -1,0 +1,4 @@
+setupRequired(pysqlite >= 2.6.3+1)
+setupOptional(daf_persistence >= 4.7.1.0+2)
+setupOptional(ctrl_orca >= 4.7.1.0+2)
+setupOptional(mysqlpython >= 1.2.3+2)

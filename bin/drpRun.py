@@ -54,28 +54,18 @@ class RunConfiguration(object):
     ###########################################################################
 
     inputBase = "/lsst3/weekly/data"
-    # outputBase = "/lsst3/weekly/datarel-runs"
-    outputBase = "/home/ktlim/datarel-runs"
+    outputBase = "/lsst3/weekly/datarel-runs"
     pipelinePolicy = "PT1Pipe/main-ImSim.paf"
-    # toAddress = "lsst-devel-runs@lsstcorp.org"
-    toAddress = "ktl@slac.stanford.edu"
+    toAddress = "lsst-devel-runs@lsstcorp.org"
     pipeQaBase = "http://lsst1.ncsa.illinois.edu/pipeQA/dev/"
     pipeQaDir = "/lsst/public_html/pipeQA/html/dev"
     dbHost = "lsst10.ncsa.uiuc.edu"
 
     # One extra process will be used on the first node for the JobOffice
     machineSets = {
-            'rh5-1': ['lsst5:3', 'lsst11:2'],
-            'rh5-2': ['lsst6:2', 'lsst8:2', 'lsst11:1'],
-            # lsst5 8 cores 8 GB RH5
-            # lsst6 8 cores 8 GB Condor RH5
-            # lsst8 8 cores 8 GB ActiveMQ RH5
-            # lsst11 4 cores 8 GB CentOS5
-            'rh6-1': ['lsst9:3', 'lsst14:2'],
-            'rh6-2': ['lsst14:1', 'lsst15:3'],
-            # lsst9 8 cores 8 GB RH6
-            # lsst14 4 cores 8 GB RH6
-            # lsst15 4 cores 8 GB RH6
+            'rh6-1': ['lsst5:4', 'lsst6:2'],
+            'rh6-2': ['lsst6:2', 'lsst9:4'],
+            'rh6-3': ['lsst11:2', 'lsst14:2', 'lsst15:2']
     }
 
     runIdPattern = "%(runType)s_%(datetime)s"
@@ -262,6 +252,7 @@ Run: %s
 RunType: %s
 User: %s
 Pipeline: %s
+EUPS_PATH: %s
 Input: %s
 CCD count: %d
 Output: %s
@@ -269,15 +260,11 @@ Database: %s
 Overrides: %s
 """ % (RunConfiguration.version,
         self.runId, self.options.runType, self.user, self.options.pipeline,
+        os.environ["EUPS_PATH"],
         self.options.input, self.options.ccdCount, self.outputDirectory,
         self.dbName, str(self.options.override))
 
         self.lockMachines()
-        # TODO -- better error handling
-        # on error, log problem, E-mail problem and relevant output, make sure
-        # all resources are cleaned up
-        # on kill, don't do post-processing
-        # on keyboard interrupt, kill
         try:
             os.chdir(self.outputDirectory)
             os.mkdir("run")
@@ -295,9 +282,21 @@ Overrides: %s
             self.doOrcaRun()
             self._log("Orca run complete")
             self._sendmail("[drpRun] Orca done: run %s" % (self.runId,),
-                    self.analyzeLogs(self.runId))
+                    self.runInfo + "\n" + self.analyzeLogs(self.runId))
 
-            # TODO -- check that at least two calexps and srcs were created
+            if self.checkForKill():
+                self._sendmail("[drpRun] Orca killed: run %s" % (self.runId,),
+                        self.runInfo)
+                self.unlockMachines()
+                return
+            if not self.checkForResults():
+                self._log("*** Insufficient results after Orca")
+                self._sendmail("[drpRun] Insufficient results: run %s" %
+                        (self.runId,),
+                        self.runInfo + "\n" + self.analyzeLogs(self.runId))
+                self.unlockMachines()
+                return
+
             self.setupCheck()
             self.doAdditionalJobs()
             self._log("SourceAssociation and ingest complete")
@@ -315,8 +314,8 @@ Overrides: %s
                 self._sendmail("[drpRun] Complete: run %s" %
                         (self.runId,), self.runInfo)
 
-        except:
-            self._log("*** Exception in run")
+        except Exception, e:
+            self._log("*** Exception in run:\n" + str(e))
             self._sendmail("[drpRun] Aborted: run %s" % (self.runId,),
                     self.runInfo)
             raise
@@ -564,8 +563,20 @@ workflow: {
                 (self.arch,))
 
     def unlockMachines(self):
-        os.rename(self._lockName(self.machineSet),
-                os.path.join(self.outputDirectory, "run", "run.log"))
+        lockName = self._lockName(self.machineSet)
+        if not os.access(lockName, os.R_OK):
+            # Lock file no longer there...
+            return
+        with open(lockName, "r") as lockFile:
+            for line in lockFile:
+                if line.startswith("Output: "):
+                    outputDirectory = re.sub(r'^Output:\s+', "", line.rstrip())
+                    break
+        if self.outputDirectory is not None and \
+                self.outputDirectory != outputDirectory:
+            print >>sys.stderr, "Output directory discrepancy:", \
+                    self.outputDirectory, outputDirectory
+        os.rename(lockName, os.path.join(outputDirectory, "run", "run.log"))
 
     def _exec(self, command, logFile):
         try:
@@ -588,8 +599,8 @@ workflow: {
                     " -r ."
                     " -V 30 -L 2 orca.paf " + self.runId + 
                     " >& unifiedPipeline.log",
-                    shell=True)
-            # TODO -- monitor orca run, looking for output changes
+                    shell=True, stdin=open("/dev/null", "r"))
+            # TODO -- monitor orca run, looking for output changes/stalls
             # TODO -- look for MemoryErrors and bad_allocs in logs
         except subprocess.CalledProcessError:
             self._log("*** Orca failed")
@@ -598,9 +609,7 @@ workflow: {
             raise
         except KeyboardInterrupt:
             self._log("*** Orca interrupted")
-            subprocess.check_call(
-                    "$CTRL_ORCA_DIR/bin/shutprod.py 1 " + self.runId,
-                    shell=True)
+            self.kill(self.runId)
             raise
 
     def setupCheck(self):
@@ -730,9 +739,41 @@ workflow: {
         self.machineSet = self.findMachineSet(runId)
         if self.machineSet is None:
             raise RuntimeError("No current run with runId " + runId)
-        self._log("orca killed")
+        self._log("*** orca killed")
         subprocess.check_call("$CTRL_ORCA_DIR/bin/shutprod.py 1 " + runId,
                 shell=True)
+        print >>sys.stderr, "waiting for production shutdown"
+        time.sleep(10)
+        print >>sys.stderr, "killing all remote processes"
+        for machine in RunConfiguration.machineSets[self.machineSet]:
+            machine = re.sub(r':.*', "", machine)
+            processes = subprocess.Popen(["ssh", machine, "/bin/ps", "-o",
+                "pid:6,command"], stdout=subprocess.PIPE)
+            for line in processes.stdout:
+                if line.find(runId) != -1:
+                    pid = int(line[0:6].strip())
+                    subprocess.check_call(["ssh", machine, "/bin/kill", pid])
+            processes.wait()
+        time.sleep(5)
+        print >>sys.stderr, "unlocking machine set"
+        self.unlockMachines()
+
+    def checkForKill(self):
+        with open(self._lockName(self.machineSet), "r") as lockFile:
+            for line in lockFile:
+                if line.find("orca killed") != -1:
+                    return True
+        return False
+
+    def checkForResults(self):
+        calexps = glob.glob(os.path.join(self.outputDirectory,
+            "update", "calexp", "*", "*"))
+        if len(calexps) < 2:
+            return False
+        srcs = glob.glob(os.path.join(self.outputDirectory,
+            "update", "src", "*", "*"))
+        return len(srcs) >= 2
+
 
 ###############################################################################
 # 
