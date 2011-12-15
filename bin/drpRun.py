@@ -53,34 +53,26 @@ class RunConfiguration(object):
     # Configuration information
     ###########################################################################
 
-    spacePerCcd = int(160e6) # calexp only
-    collection = "PT1.2"
     inputBase = "/lsst3/weekly/data"
-    # outputBase = "/lsst3/weekly/datarel-runs"
-    outputBase = "/home/jbosch/datarel-runs"
-    lockBase = os.path.join(outputBase, "locks")
+    outputBase = "/lsst3/weekly/datarel-runs"
     pipelinePolicy = "PT1Pipe/main-ImSim.paf"
-    runIdPattern = "%(runType)s_%(datetime)s"
-    # toAddress = "lsst-devel-runs@lsstcorp.org"
-    toAddress = "ktl@slac.stanford.edu"
+    toAddress = "lsst-devel-runs@lsstcorp.org"
     pipeQaBase = "http://lsst1.ncsa.illinois.edu/pipeQA/dev/"
     pipeQaDir = "/lsst/public_html/pipeQA/html/dev"
     dbHost = "lsst10.ncsa.uiuc.edu"
 
     # One extra process will be used on the first node for the JobOffice
     machineSets = {
-            'rh5-1': ['lsst5:3', 'lsst11:2'],
-            'rh5-2': ['lsst6:2', 'lsst8:2', 'lsst11:1'],
-            # lsst5 8 cores 8 GB RH5
-            # lsst6 8 cores 8 GB Condor RH5
-            # lsst8 8 cores 8 GB ActiveMQ RH5
-            # lsst11 4 cores 8 GB CentOS5
-            'rh6-1': ['lsst9:3', 'lsst14:2'],
-            'rh6-2': ['lsst14:1', 'lsst15:3'],
-            # lsst9 8 cores 8 GB RH6
-            # lsst14 4 cores 8 GB RH6
-            # lsst15 4 cores 8 GB RH6
+            'rh6-1': ['lsst5:4', 'lsst6:2'],
+            'rh6-2': ['lsst6:2', 'lsst9:4'],
+            'rh6-3': ['lsst11:2', 'lsst14:2', 'lsst15:2']
     }
+
+    runIdPattern = "%(runType)s_%(datetime)s"
+    lockBase = os.path.join(outputBase, "locks")
+    collection = "PT1.2"
+    spacePerCcd = int(160e6) # calexp only
+    version = 1
 
     ###########################################################################
 
@@ -100,8 +92,8 @@ class RunConfiguration(object):
             self.report(os.path.join(self.options.output,
                 self.options.report, "run", "run.log"))
             sys.exit(0)
-        if self.options.errorReport is not None:
-            print self.errorReport(self.options.errorReport)
+        if self.options.listRuns:
+            self.listRuns(self.options.listRuns)
             sys.exit(0)
         if self.options.listInputs:
             self.listInputs()
@@ -138,7 +130,7 @@ class RunConfiguration(object):
         self.inputDirectory = os.path.join(self.inputBase,
                 RunConfiguration.collection)
         self.outputDirectory = os.path.join(self.options.output, self.runId)
-        self.outputDirectory = abspath(self.outputDirectory)
+        self.outputDirectory = os.path.abspath(self.outputDirectory)
         if os.path.exists(self.outputDirectory):
             raise RuntimeError("Output directory %s already exists" %
                     (self.outputDirectory,))
@@ -150,7 +142,8 @@ class RunConfiguration(object):
         self.setups = dict()
         for product in e.getSetupProducts():
             if product.name != "eups":
-                self.setups[product.name] = product.version
+                self.setups[product.name] = \
+                        re.sub(r'^LOCAL:', "-r ", product.version)
 
         # TODO -- load policy and apply overrides
         self.options.override = None
@@ -192,7 +185,10 @@ class RunConfiguration(object):
         if tailLog:
             logFile = os.path.join(outputDir, "run", "unifiedPipeline.log")
             with open(logFile, "r") as log:
-                log.seek(-500, 2)
+                try:
+                    log.seek(-500, 2)
+                except:
+                    pass
                 result += "(last 500 bytes)... " + log.read(500) + "\n"
 
         return result
@@ -202,6 +198,14 @@ class RunConfiguration(object):
             if os.path.exists(os.path.join(RunConfiguration.inputBase, path,
                 RunConfiguration.collection)):
                 print path
+
+    def listRuns(self, partialId):
+        for path in sorted(glob.glob(os.path.join(self.options.output,
+            "*" + partialId + "*"))):
+            if not os.path.exists(os.path.join(path, "run")):
+                continue
+            runId = os.path.basename(path)
+            print runId
 
     def check(self):
         for requiredPackage in ['ctrl_orca', 'datarel', 'astrometry_net_data']:
@@ -243,23 +247,24 @@ class RunConfiguration(object):
                     (availableSpace, minimumSpace))
 
     def run(self):
-        self.runInfo = """Run: %s
+        self.runInfo = """Version: %d
+Run: %s
 RunType: %s
 User: %s
 Pipeline: %s
+EUPS_PATH: %s
 Input: %s
 CCD count: %d
 Output: %s
 Database: %s
 Overrides: %s
-""" % (self.runId, self.options.runType, self.user, self.options.pipeline,
+""" % (RunConfiguration.version,
+        self.runId, self.options.runType, self.user, self.options.pipeline,
+        os.environ["EUPS_PATH"],
         self.options.input, self.options.ccdCount, self.outputDirectory,
         self.dbName, str(self.options.override))
 
         self.lockMachines()
-        # TODO -- better error handling
-        # on error, log problem, E-mail problem and relevant output, make sure
-        # all resources are cleaned up
         try:
             os.chdir(self.outputDirectory)
             os.mkdir("run")
@@ -276,9 +281,23 @@ Overrides: %s
             self._log("Orca run started")
             self.doOrcaRun()
             self._log("Orca run complete")
-            self.setupCheck()
             self._sendmail("[drpRun] Orca done: run %s" % (self.runId,),
-                    self.analyzeLogs(self.runId))
+                    self.runInfo + "\n" + self.analyzeLogs(self.runId))
+
+            if self.checkForKill():
+                self._sendmail("[drpRun] Orca killed: run %s" % (self.runId,),
+                        self.runInfo)
+                self.unlockMachines()
+                return
+            if not self.checkForResults():
+                self._log("*** Insufficient results after Orca")
+                self._sendmail("[drpRun] Insufficient results: run %s" %
+                        (self.runId,),
+                        self.runInfo + "\n" + self.analyzeLogs(self.runId))
+                self.unlockMachines()
+                return
+
+            self.setupCheck()
             self.doAdditionalJobs()
             self._log("SourceAssociation and ingest complete")
             if self.options.doPipeQa:
@@ -294,9 +313,15 @@ Overrides: %s
             else:
                 self._sendmail("[drpRun] Complete: run %s" %
                         (self.runId,), self.runInfo)
+
+        except Exception, e:
+            self._log("*** Exception in run:\n" + str(e))
+            self._sendmail("[drpRun] Aborted: run %s" % (self.runId,),
+                    self.runInfo)
+            raise
+
         finally:
             self.unlockMachines()
-
 
 ###############################################################################
 # 
@@ -538,8 +563,20 @@ workflow: {
                 (self.arch,))
 
     def unlockMachines(self):
-        os.rename(self._lockName(self.machineSet),
-                os.path.join(self.outputDirectory, "run", "run.log"))
+        lockName = self._lockName(self.machineSet)
+        if not os.access(lockName, os.R_OK):
+            # Lock file no longer there...
+            return
+        with open(lockName, "r") as lockFile:
+            for line in lockFile:
+                if line.startswith("Output: "):
+                    outputDirectory = re.sub(r'^Output:\s+', "", line.rstrip())
+                    break
+        if self.outputDirectory is not None and \
+                self.outputDirectory != outputDirectory:
+            print >>sys.stderr, "Output directory discrepancy:", \
+                    self.outputDirectory, outputDirectory
+        os.rename(lockName, os.path.join(outputDirectory, "run", "run.log"))
 
     def _exec(self, command, logFile):
         try:
@@ -548,7 +585,10 @@ workflow: {
             cmd = command.split(' ', 1)[0].split('/')[-1]
             print >>sys.stderr, "***", cmd, "failed"
             with open(logFile, "r") as log:
-                log.seek(-500, 2)
+                try:
+                    log.seek(-500, 2)
+                except:
+                    pass
                 print >>sys.stderr, "(last 500 bytes)...", log.read(500)
             raise
 
@@ -559,13 +599,17 @@ workflow: {
                     " -r ."
                     " -V 30 -L 2 orca.paf " + self.runId + 
                     " >& unifiedPipeline.log",
-                    shell=True)
-            # TODO -- monitor orca run, looking for output changes
+                    shell=True, stdin=open("/dev/null", "r"))
+            # TODO -- monitor orca run, looking for output changes/stalls
             # TODO -- look for MemoryErrors and bad_allocs in logs
         except subprocess.CalledProcessError:
-            print >>sys.stderr, "*** Orca failed"
+            self._log("*** Orca failed")
             print >>sys.stderr, self.orcaStatus(self.runId,
                     self.outputDirectory)
+            raise
+        except KeyboardInterrupt:
+            self._log("*** Orca interrupted")
+            self.kill(self.runId)
             raise
 
     def setupCheck(self):
@@ -695,9 +739,41 @@ workflow: {
         self.machineSet = self.findMachineSet(runId)
         if self.machineSet is None:
             raise RuntimeError("No current run with runId " + runId)
-        self._log("orca killed")
+        self._log("*** orca killed")
         subprocess.check_call("$CTRL_ORCA_DIR/bin/shutprod.py 1 " + runId,
                 shell=True)
+        print >>sys.stderr, "waiting for production shutdown"
+        time.sleep(10)
+        print >>sys.stderr, "killing all remote processes"
+        for machine in RunConfiguration.machineSets[self.machineSet]:
+            machine = re.sub(r':.*', "", machine)
+            processes = subprocess.Popen(["ssh", machine, "/bin/ps", "-o",
+                "pid:6,command"], stdout=subprocess.PIPE)
+            for line in processes.stdout:
+                if line.find(runId) != -1:
+                    pid = int(line[0:6].strip())
+                    subprocess.check_call(["ssh", machine, "/bin/kill", pid])
+            processes.wait()
+        time.sleep(5)
+        print >>sys.stderr, "unlocking machine set"
+        self.unlockMachines()
+
+    def checkForKill(self):
+        with open(self._lockName(self.machineSet), "r") as lockFile:
+            for line in lockFile:
+                if line.find("orca killed") != -1:
+                    return True
+        return False
+
+    def checkForResults(self):
+        calexps = glob.glob(os.path.join(self.outputDirectory,
+            "update", "calexp", "*", "*"))
+        if len(calexps) < 2:
+            return False
+        srcs = glob.glob(os.path.join(self.outputDirectory,
+            "update", "src", "*", "*"))
+        return len(srcs) >= 2
+
 
 ###############################################################################
 # 
@@ -709,10 +785,11 @@ workflow: {
         import MySQLdb
         from lsst.daf.persistence import DbAuth
         jobStartRegex = re.compile(
-                r"Processing job: type=calexp "
-                "sensor=(?P<sensor>\d,\d) "
-                "visit=(?P<visit>\d+) "
-                "raft=(?P<raft>\d,\d)"
+                r"Processing job:"
+                r"(\s+raft=(?P<raft>\d,\d)"
+                r"|\s+sensor=(?P<sensor>\d,\d)"
+                r"|\s+type=calexp"
+                r"|\s+visit=(?P<visit>\d+)){4}"
         )
 
         host = RunConfiguration.dbHost
@@ -751,20 +828,20 @@ workflow: {
                 else:
                     return "*** No log entries written\n"
             startTime, start = row
-            result += "First log entry: %s\n" % (start,)
+            result += "First orca log entry: %s\n" % (start,)
     
             cursor = conn.cursor()
             cursor.execute("""SELECT TIMESTAMP, timereceived FROM Logs
                 WHERE id = (SELECT MAX(id) FROM Logs)""")
             stopTime, stop = cursor.fetchone()
-            result += "Last log entry: %s\n" % (stop,)
+            result += "Last orca log entry: %s\n" % (stop,)
             elapsed = long(stopTime) - long(startTime)
             elapsedHr = elapsed / 3600 / 1000 / 1000 / 1000
             elapsed -= elapsedHr * 3600 * 1000 * 1000 * 1000
             elapsedMin = elapsed / 60 / 1000 / 1000 / 1000
             elapsed -= elapsedMin * 60 * 1000 * 1000 * 1000
             elapsedSec = elapsed / 1.0e9
-            result += "Elapsed time: %d:%02d:%06.3f\n" % (elapsedHr,
+            result += "Orca elapsed time: %d:%02d:%06.3f\n" % (elapsedHr,
                     elapsedMin, elapsedSec)
     
             cursor = conn.cursor()
@@ -783,10 +860,10 @@ workflow: {
                     WHEN 4 THEN 'calexp writes'
                 END AS descr, COUNT(*) FROM (
                     SELECT CASE
-                        WHEN COMMENT LIKE 'Processing job:% visit=0 %'
+                        WHEN COMMENT LIKE 'Processing job:% visit=0'
                         THEN 1
                         WHEN COMMENT LIKE 'Processing job:%'
-                            AND COMMENT NOT LIKE '% visit=0 %'
+                            AND COMMENT NOT LIKE '% visit=0'
                         THEN 2
                         WHEN COMMENT LIKE 'Ending write to BoostStorage%/src%'
                         THEN 3
@@ -842,62 +919,6 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
             """)
             result += "%s failures seen\n" % cursor.fetchone()
 
-        finally:
-            conn.close()
-        return result
-
-    def errorReport(self, runId):
-        import MySQLdb
-        from lsst.daf.persistence import DbAuth
-        jobStartRegex = re.compile(
-                r"Processing job: type=calexp "
-                "sensor=(?P<sensor>\d,\d) "
-                "visit=(?P<visit>\d+) "
-                "raft=(?P<raft>\d,\d)"
-        )
-
-        host = RunConfiguration.dbHost
-        port = 3306
-        with MySQLdb.connect(
-                host=host,
-                port=port,
-                user=DbAuth.username(host, str(port)),
-                passwd=DbAuth.password(host, str(port))) as conn:
-            runpat = '%' + runId + '%'
-            conn.execute("SHOW DATABASES LIKE %s", (runpat,))
-            ret = conn.fetchall()
-            if ret is None or len(ret) == 0:
-                raise NoMatchError("No match for run %s" % (runId,))
-            elif len(ret) > 1:
-                raise RuntimeError("Multiple runs match:\n" +
-                        str([r[0] for r in ret]))
-            dbName = ret[0][0]
-
-        result = ""
-        try:
-            conn = MySQLdb.connect(
-                host=host,
-                port=port,
-                user=DbAuth.username(host, str(port)),
-                passwd=DbAuth.password(host, str(port)),
-                db=dbName)
-
-            cursor = conn.cursor()
-            cursor.execute("""SELECT TIMESTAMP, timereceived FROM Logs
-                WHERE id = (SELECT MIN(id) FROM Logs)""")
-            row = cursor.fetchone()
-            if row is None:
-                return "*** No log entries written\n"
-
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT workerid, COMMENT
-                FROM Logs JOIN
-                (SELECT MAX(id) AS last FROM Logs GROUP BY workerid) AS a
-                ON (Logs.id = a.last)""")
-            for worker, msg in cursor.fetchall():
-                result += "Pipeline %s last status: %s\n" % (worker, msg)
-
             cursor = conn.cursor(MySQLdb.cursors.DictCursor)
             cursor.execute("""
                 SELECT * FROM Logs
@@ -929,22 +950,52 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
                             match.group("sensor"))
                 elif not d['COMMENT'].startswith('Processing job:'):
                     if jobs.has_key(d['workerid']):
-                        result += "*** Error in %s on %s:\n" % (
-                                jobs[d['workerid']], d['workerid'])
+                        job = jobs[d['workerid']]
                     else:
-                        result += "*** Error in unknown job on %s:\n" % (
-                                d['workerid'],)
+                        job = "unknown"
+                    result += "\n*** Error in %s in stage %s on %s:\n" % (
+                                job, d['stagename'], d['workerid'])
                     lines = d['COMMENT'].split('\n')
-                    i = -1
+                    i = len(lines) - 1
                     message = lines[i].strip()
-                    while message == "":
+                    # Skip blank lines at end
+                    while i > 0 and message == "":
                         i -= 1
                         message = lines[i].strip()
-                    result += lines[i-1].strip() + "\n" + message + "\n"
-
+                    # Go back until we find a traceback line with " in "
+                    while i > 0 and lines[i].find(" in ") == -1:
+                        i -= 1
+                        message = lines[i].strip() + "\n" + message
+                    result += message + "\n"
 
         finally:
             conn.close()
+
+        outputDir = os.path.join(self.options.output, runId)
+        logFile = os.path.join(outputDir, "run", "unifiedPipeline.log")
+        with open(logFile, "r") as log:
+            try:
+                log.seek(-500, 2)
+            except:
+                pass 
+            tail = log.read(500)
+            if not tail.endswith("logger handled...and...done!\n"):
+                result += "\n*** Unified pipeline log file\n"
+                result += "(last 500 bytes)... " + tail + "\n"
+
+        for logFile in glob.glob(
+                os.path.join(outputDir, "work", "*", "launch.log")):
+            with open(logFile, "r") as log:
+                try:
+                    log.seek(-500, 2)
+                except:
+                    pass
+                tail = log.read(500)
+                if not re.search(r"harness.runPipeline: workerid \w+$", tail) \
+                        and tail != "done. Now starting job office\n":
+                    result += "\n*** " + logFile + "\n"
+                    result += "(last 500 bytes)... " + tail + "\n"
+
         return result
 
 ###############################################################################
@@ -989,13 +1040,13 @@ Uses the current stack and setup package versions.""")
                     choices=archs,
                     help="machine architecture [" + ', '.join(archs) + "]")
 
+        parser.add_option("-L", "--listRuns", metavar="PARTIALRUNID",
+                help="list available runs matching partial id and exit")
         parser.add_option("-S", "--status", dest="printStatus",
                 action="store_true",
                 help="print current run status and exit")
         parser.add_option("-R", "--report", metavar="RUNID",
                 help="print report for RUNID and exit")
-        parser.add_option("-E", "--errorReport", metavar="RUNID",
-                help="print error report for RUNID and exit")
         parser.add_option("-k", "--kill", metavar="RUNID",
                 help="kill Orca processes and exit")
         
@@ -1011,7 +1062,7 @@ Uses the current stack and setup package versions.""")
 
         parser.add_option("-x", "--testOnly", action="store_true",
                 help="do NOT link run results as the latest of its type")
-        parser.add_option("-L", "--linkLatest", metavar="RUNID",
+        parser.add_option("-l", "--linkLatest", metavar="RUNID",
                 help="link previous run result as the latest of its type and exit")
         parser.add_option("--skipPipeQa", dest="doPipeQa",
                 action="store_false",
