@@ -112,6 +112,9 @@ class RunConfiguration(object):
         if self.options.kill is not None:
             self.kill(self.options.kill)
             sys.exit(0)
+        if self.options.hosts is not None:
+            self.hosts()
+            sys.exit(0)
 
         if self.arch is None:
             if self.options.arch is None:
@@ -155,6 +158,15 @@ class RunConfiguration(object):
 
         # TODO -- load policy and apply overrides
         self.options.override = None
+
+    def hosts(self):
+        machines = set()
+        for machineSet in RunConfiguration.machineSets.itervalues():
+            for machine in machineSet:
+                machine = re.sub(r':.*', "", machine)
+                machines.update([machine])
+        for machine in machines:
+            subprocess.check_call(["ssh", machine, "/bin/true"])
 
     def printStatus(self):
         machineSets = RunConfiguration.machineSets.keys()
@@ -1080,6 +1092,9 @@ Uses the current stack and setup package versions.""")
         parser.add_option("-m", "--mail", dest="toAddress",
                 metavar="ADDR",
                 help="E-mail address for notifications (default: %default)")
+
+        parser.add_option("-H", "--hosts", action="store_true",
+                help="test ssh connectivity to all hosts and exit")
 
         input = None
         for entry in sorted(os.listdir(RunConfiguration.inputBase),
