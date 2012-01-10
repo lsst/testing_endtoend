@@ -74,6 +74,13 @@ class RunConfiguration(object):
     collection = "PT1.2"
     spacePerCcd = int(160e6) # calexp only
     version = 1
+    sendmail = None
+    for sm in ["/usr/sbin/sendmail", "/usr/bin/sendmail", "/sbin/sendmail"]:
+        if os.access(sm, os.X_OK):
+            sendmail = sm
+            break
+    if sendmail is None:
+        raise RuntimeError("Unable to find sendmail executable")
 
     ###########################################################################
 
@@ -337,8 +344,8 @@ Overrides: %s
         msg['From'] = self.fromAddress
         msg['To'] = self.options.toAddress
 
-        mail = subprocess.Popen(["sendmail", "-t", "-f", self.fromAddress],
-                stdin=subprocess.PIPE)
+        mail = subprocess.Popen([RunConfiguration.sendmail,
+            "-t", "-f", self.fromAddress], stdin=subprocess.PIPE)
         try:
             print >>mail.stdin, msg
         finally:
