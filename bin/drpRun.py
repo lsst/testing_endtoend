@@ -751,7 +751,7 @@ workflow: {
                 "pid:6,command"], stdout=subprocess.PIPE)
             for line in processes.stdout:
                 if line.find(runId) != -1:
-                    pid = int(line[0:6].strip())
+                    pid = line[0:6].strip()
                     subprocess.check_call(["ssh", machine, "/bin/kill", pid])
             processes.wait()
         time.sleep(5)
