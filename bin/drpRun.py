@@ -26,6 +26,7 @@ import glob
 from optparse import OptionParser
 import os
 import re
+import shutil
 import socket
 import sqlite
 import subprocess
@@ -576,7 +577,8 @@ workflow: {
                 self.outputDirectory != outputDirectory:
             print >>sys.stderr, "Output directory discrepancy:", \
                     self.outputDirectory, outputDirectory
-        os.rename(lockName, os.path.join(outputDirectory, "run", "run.log"))
+        # os.rename has problems spanning filesystems, so use shutil.move
+        shutil.move(lockName, os.path.join(outputDirectory, "run", "run.log"))
 
     def _exec(self, command, logFile):
         try:
