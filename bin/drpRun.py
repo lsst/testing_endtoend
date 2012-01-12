@@ -592,7 +592,8 @@ workflow: {
                 if line.startswith("Output: "):
                     outputDirectory = re.sub(r'^Output:\s+', "", line.rstrip())
                     break
-        if self.outputDirectory is not None and \
+        if hasattr(self, "outputDirectory") and \
+                self.outputDirectory is not None and \
                 self.outputDirectory != outputDirectory:
             print >>sys.stderr, "Output directory discrepancy:", \
                     self.outputDirectory, outputDirectory
