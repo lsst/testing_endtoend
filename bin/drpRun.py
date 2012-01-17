@@ -789,11 +789,11 @@ workflow: {
 
     def checkForResults(self):
         calexps = glob.glob(os.path.join(self.outputDirectory,
-            "update", "calexp", "*", "*"))
+            "update", "calexp", "v*", "R*", "S*.fits"))
         if len(calexps) < 2:
             return False
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "update", "src", "*", "*"))
+            "update", "src", "v*", "R*", "S*.fits"))
         return len(srcs) >= 2
 
 
