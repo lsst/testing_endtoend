@@ -36,6 +36,7 @@ import time
 
 import eups
 # import lsst.pex.policy as pexPolicy
+from lsst.daf.persistence import DbAuth
 
 def _checkReadable(path):
     if not os.access(path, os.R_OK):
@@ -61,6 +62,7 @@ class RunConfiguration(object):
     pipeQaBase = "http://lsst1.ncsa.illinois.edu/pipeQA/dev/"
     pipeQaDir = "/lsst/public_html/pipeQA/html/dev"
     dbHost = "lsst10.ncsa.uiuc.edu"
+    dbPort = 3306
 
     # One extra process will be used on the first node for the JobOffice
     machineSets = {
@@ -73,7 +75,7 @@ class RunConfiguration(object):
     lockBase = os.path.join(outputBase, "locks")
     collection = "PT1.2"
     spacePerCcd = int(160e6) # calexp only
-    version = 1
+    version = 2
     sendmail = None
     for sm in ["/usr/sbin/sendmail", "/usr/bin/sendmail", "/sbin/sendmail"]:
         if os.access(sm, os.X_OK):
@@ -87,6 +89,8 @@ class RunConfiguration(object):
     def __init__(self, args):
         self.datetime = time.strftime("%Y_%m%d_%H%M%S")
         self.user = os.getlogin()
+        self.dbUser = DbAuth.username(RunConfiguration.dbHost,
+                str(RunConfiguration.dbPort))
         self.hostname = socket.getfqdn()
         self.fromAddress = "%s@%s" % (self.user, self.hostname)
 
@@ -128,12 +132,13 @@ class RunConfiguration(object):
         self.collectionName = re.sub(r'\.', '_', RunConfiguration.collection)
         runIdProperties = dict(
                 user=self.user,
+                dbUser=self.dbUser,
                 coll=self.collectionName,
                 runType=self.options.runType,
                 datetime=self.datetime)
         self.runId = RunConfiguration.runIdPattern % runIdProperties
         runIdProperties['runid'] = self.runId
-        dbNamePattern = "%(user)s_%(coll)s_u_%(runid)s"
+        dbNamePattern = "%(dbUser)s_%(coll)s_u_%(runid)s"
         self.dbName = dbNamePattern % runIdProperties
 
         self.inputBase = os.path.join(RunConfiguration.inputBase,
@@ -186,8 +191,8 @@ class RunConfiguration(object):
                 if line.startswith("Output:"):
                     outputDir = re.sub(r'Output:\s+', "", line.rstrip())
         e = eups.Eups()
-        if not e.isSetup("daf_persistence") or not e.isSetup("mysqlpython"):
-            print >>sys.stderr, "*** daf_persistence and mysqlpython not setup, skipping log analysis"
+        if not e.isSetup("mysqlpython"):
+            print >>sys.stderr, "*** mysqlpython not setup, skipping log analysis"
         else:
             print self.orcaStatus(runId, outputDir)
 
@@ -271,6 +276,7 @@ class RunConfiguration(object):
 Run: %s
 RunType: %s
 User: %s
+DB User: %s
 Pipeline: %s
 EUPS_PATH: %s
 Input: %s
@@ -279,8 +285,8 @@ Output: %s
 Database: %s
 Overrides: %s
 """ % (RunConfiguration.version,
-        self.runId, self.options.runType, self.user, self.options.pipeline,
-        os.environ["EUPS_PATH"],
+        self.runId, self.options.runType, self.user, self.dbUser,
+        self.options.pipeline, os.environ["EUPS_PATH"],
         self.options.input, self.options.ccdCount, self.outputDirectory,
         self.dbName, str(self.options.override))
 
@@ -452,7 +458,7 @@ database: {
     system: {   
         authInfo: {
             host: """ + RunConfiguration.dbHost + """
-            port: 3306
+            port: """ + str(RunConfiguration.dbPort) + """
         }
         runCleanup: {
             daysFirstNotice: 7  # days when first notice is sent before run can be deleted
@@ -655,7 +661,7 @@ workflow: {
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
                 " -u %s -H %s %s" %
-                (self.user, RunConfiguration.dbHost, self.dbName),
+                (self.dbUser, RunConfiguration.dbHost, self.dbName),
                 "prepareDb.log")
         self._log("prepareDb complete")
 
@@ -663,7 +669,7 @@ workflow: {
         self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_ImSim.py"
                 " -u %s -d %s"
                 " update update/registry.sqlite3" %
-                (self.user, self.dbName),
+                (self.dbUser, self.dbName),
                 "run/ingestProcessed_ImSim.log")
         os.chdir("run")
         self._log("ingestProcessed complete")
@@ -676,20 +682,20 @@ workflow: {
                 " -e ../Science_Ccd_Exposure_Metadata.csv"
                 " -j 1"
                 " %s ../SourceAssoc ../csv-SourceAssoc" %
-                (self.user, RunConfiguration.dbHost, self.dbName),
+                (self.dbUser, RunConfiguration.dbHost, self.dbName),
                 "ingestSourceAssoc.log")
         self._log("ingestSourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/ingestSdqa_ImSim.py"
                 " -u %s -H %s -d %s"
                 " ../update ../update/registry.sqlite3" %
-                (self.user, RunConfiguration.dbHost, self.dbName),
+                (self.dbUser, RunConfiguration.dbHost, self.dbName),
                 "ingestSdqa_ImSim.log")
         self._log("ingestSdqa complete")
         self._exec("$DATAREL_DIR/bin/ingest/finishDb.py"
                 " -u %s -H %s"
                 " -t"
                 " %s" %
-                (self.user, RunConfiguration.dbHost, self.dbName),
+                (self.dbUser, RunConfiguration.dbHost, self.dbName),
                 "finishDb.log")
         self._log("finishDb complete")
 
@@ -732,7 +738,7 @@ workflow: {
 #        self._exec("$DATAREL_DIR/bin/ingest/linkDb.py"
 #                " -u %s -H %s"
 #                " -t %s"
-#                " %s" % (self.user, RunConfiguration.dbHost,
+#                " %s" % (self.dbUser, RunConfiguration.dbHost,
 #                    self.options.runType, self.dbName), "linkDb.log")
         latest = os.path.join(RunConfiguration.pipeQaDir,
                 "latest_" + self.options.runType)
@@ -805,7 +811,6 @@ workflow: {
 
     def analyzeLogs(self, runId, inProgress=False):
         import MySQLdb
-        from lsst.daf.persistence import DbAuth
         jobStartRegex = re.compile(
                 r"Processing job:"
                 r"(\s+raft=(?P<raft>\d,\d)"
@@ -815,11 +820,11 @@ workflow: {
         )
 
         host = RunConfiguration.dbHost
-        port = 3306
+        port = RunConfiguration.dbPort
         with MySQLdb.connect(
                 host=host,
                 port=port,
-                user=DbAuth.username(host, str(port)),
+                user=self.dbUser,
                 passwd=DbAuth.password(host, str(port))) as conn:
             runpat = '%' + runId + '%'
             conn.execute("SHOW DATABASES LIKE %s", (runpat,))
@@ -836,7 +841,7 @@ workflow: {
             conn = MySQLdb.connect(
                 host=host,
                 port=port,
-                user=DbAuth.username(host, str(port)),
+                user=self.dbUser,
                 passwd=DbAuth.password(host, str(port)),
                 db=dbName)
 
