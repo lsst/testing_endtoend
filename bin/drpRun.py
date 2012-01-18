@@ -793,7 +793,7 @@ workflow: {
         if len(calexps) < 2:
             return False
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "update", "src", "v*", "R*", "S*.fits"))
+            "update", "src", "v*", "R*", "S*.boost"))
         return len(srcs) >= 2
 
 
