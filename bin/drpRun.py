@@ -654,9 +654,9 @@ workflow: {
         os.mkdir("../SourceAssoc")
 
         self._exec("$DATAREL_DIR/bin/sst/SourceAssoc_ImSim.py"
-                " -i ../update"
+                " -i ../output"
                 " -o ../SourceAssoc"
-                " -R ../update/registry.sqlite3",
+                " -R ../output/registry.sqlite3",
                 "SourceAssoc_ImSim.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
@@ -668,7 +668,7 @@ workflow: {
         os.chdir("..")
         self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_ImSim.py"
                 " -u %s -d %s"
-                " update update/registry.sqlite3" %
+                " output output/registry.sqlite3" %
                 (self.dbUser, self.dbName),
                 "run/ingestProcessed_ImSim.log")
         os.chdir("run")
@@ -687,7 +687,7 @@ workflow: {
         self._log("ingestSourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/ingestSdqa_ImSim.py"
                 " -u %s -H %s -d %s"
-                " ../update ../update/registry.sqlite3" %
+                " ../output ../output/registry.sqlite3" %
                 (self.dbUser, RunConfiguration.dbHost, self.dbName),
                 "ingestSdqa_ImSim.log")
         self._log("ingestSdqa complete")
@@ -795,11 +795,11 @@ workflow: {
 
     def checkForResults(self):
         calexps = glob.glob(os.path.join(self.outputDirectory,
-            "update", "calexp", "v*", "R*", "S*.fits"))
+            "output", "calexp", "v*", "R*", "S*.fits"))
         if len(calexps) < 2:
             return False
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "update", "src", "v*", "R*", "S*.boost"))
+            "output", "src", "v*", "R*", "S*.boost"))
         return len(srcs) >= 2
 
 
