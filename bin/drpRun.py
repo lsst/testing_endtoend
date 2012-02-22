@@ -1019,6 +1019,7 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
                     pass
                 tail = log.read(500)
                 if not re.search(r"harness.runPipeline: workerid \w+$", tail) \
+                        and not re.search(r"Applying aperture", tail) \
                         and tail != "done. Now starting job office\n":
                     result += "\n*** " + logFile + "\n"
                     result += "(last 500 bytes)... " + tail + "\n"
