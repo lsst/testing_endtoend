@@ -1,0 +1,6 @@
+.sconf_temp
+.sconsign.dblite
+config.log
+python/lsst/testing/endtoend/version.py
+tests/.tests
+ups/*.cfgc
