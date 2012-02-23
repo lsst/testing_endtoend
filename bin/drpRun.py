@@ -343,7 +343,7 @@ Overrides: %s
         except Exception, e:
             self._log("*** Exception in run:\n" + str(e))
             self._sendmail("[drpRun] Aborted: run %s" % (self.runId,),
-                    self.runInfo)
+                    self.runInfo + "\n" + str(e))
             raise
 
         finally:
