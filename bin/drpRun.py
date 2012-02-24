@@ -702,6 +702,7 @@ workflow: {
     def doPipeQa(self):
         _checkWritable(RunConfiguration.pipeQaDir)
         os.environ['WWW_ROOT'] = RunConfiguration.pipeQaDir
+        os.environ['WWW_RERUN'] = self.dbName
         self._exec("$TESTING_DISPLAYQA_DIR/bin/newQa.py " + self.dbName,
                 "newQa.log")
         self._exec("$TESTING_PIPEQA_DIR/bin/pipeQa.py"
