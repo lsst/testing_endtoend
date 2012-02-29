@@ -685,12 +685,6 @@ workflow: {
                 (self.dbUser, RunConfiguration.dbHost, self.dbName),
                 "ingestSourceAssoc.log")
         self._log("ingestSourceAssoc complete")
-        self._exec("$DATAREL_DIR/bin/ingest/ingestSdqa_ImSim.py"
-                " -u %s -H %s -d %s"
-                " ../output ../output/registry.sqlite3" %
-                (self.dbUser, RunConfiguration.dbHost, self.dbName),
-                "ingestSdqa_ImSim.log")
-        self._log("ingestSdqa complete")
         self._exec("$DATAREL_DIR/bin/ingest/finishDb.py"
                 " -u %s -H %s"
                 " -t"
