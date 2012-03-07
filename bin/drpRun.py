@@ -528,16 +528,23 @@ workflow: {
     def generateInputList(self):
         with open("ccdlist", "w") as inputFile:
             print >>inputFile, ">intids visit"
-            conn = sqlite.connect(self.registryPath)
-            conn.text_factory = str
-            cmd = "SELECT DISTINCT visit, raft, sensor " + \
-                    "FROM raw ORDER BY visit, raft, sensor"
-            if self.options.ccdCount is not None and self.options.ccdCount > 0:
-                cmd += " LIMIT %d" % (self.options.ccdCount,)
-            cursor = conn.execute(cmd)
-            for row in cursor:
-                print >>inputFile, "raw visit=%s raft=%s sensor=%s" % row
-
+            import lsst.daf.persistence as dafPersist
+            from lsst.obs.lsstSim import LsstSimMapper
+            butler = dafPersist.ButlerFactory(
+                    mapper=LsstSimMapper(root=self.inputDirectory)).create()
+            for sensorRef in butler.subset("raw", "sensor"):
+                numChannels = 0
+                for channelRef in sensorRef.subItems():
+                    if butler.datasetExists("raw", channelRef.dataId):
+                        numChannels += 1
+                id = "visit=%(visit)d raft=%(raft)s sensor=%(sensor)s" % \
+                        sensorRef.dataId
+                if numChannels == 32:
+                    print >>inputFile, "raw", id
+                else:
+                    print >>sys.stderr, "Warning:", id, \
+                            "has %d channel files (should be 32);" % \
+                            (numChannels,), "not processing"
             for i in xrange(self.nPipelines):
                 print >>inputFile, "raw visit=0 raft=0 sensor=0"
 
@@ -769,7 +776,7 @@ workflow: {
         subprocess.check_call("$CTRL_ORCA_DIR/bin/shutprod.py 1 " + runId,
                 shell=True)
         print >>sys.stderr, "waiting for production shutdown"
-        time.sleep(10)
+        time.sleep(15)
         print >>sys.stderr, "killing all remote processes"
         for machine in RunConfiguration.machineSets[self.machineSet]:
             machine = re.sub(r':.*', "", machine)
@@ -778,7 +785,8 @@ workflow: {
             for line in processes.stdout:
                 if line.find(runId) != -1:
                     pid = line[0:6].strip()
-                    subprocess.check_call(["ssh", machine, "/bin/kill", pid])
+                    # Ignore exit status
+                    subprocess.call(["ssh", machine, "/bin/kill", pid])
             processes.wait()
         time.sleep(5)
         print >>sys.stderr, "unlocking machine set"
