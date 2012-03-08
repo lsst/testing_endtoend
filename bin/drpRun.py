@@ -63,22 +63,25 @@ class RunConfiguration(object):
     pipeQaDir = "/lsst/public_html/pipeQA/html/dev"
     dbHost = "lsst10.ncsa.uiuc.edu"
     dbPort = 3306
+    eventBrokerHost = "lsst8.ncsa.illinois.edu"
 
     # One extra process will be used on the first node for the JobOffice
+    # Format = architecture-set number: ['machine name:number of processes']
     machineSets = {
             'rh6-1': ['lsst5:4', 'lsst6:2'],
             'rh6-2': ['lsst6:2', 'lsst9:4'],
             'rh6-3': ['lsst11:2', 'lsst14:2', 'lsst15:2']
     }
 
+    # These should generally be left unchanged
     runIdPattern = "%(runType)s_%(datetime)s"
     lockBase = os.path.join(outputBase, "locks")
     collection = "PT1.2"
     spacePerCcd = int(160e6) # calexp only
     version = 2
     sendmail = None
-    for sm in ["/usr/sbin/sendmail", "/usr/bin/sendmail", "/sbin/sendmail"]:
-        if os.access(sm, os.X_OK):
+    for sm in ["/usr/sbin", "/usr/bin", "/sbin"]:
+        if os.access(os.path.join(sm, "sendmail"), os.X_OK):
             sendmail = sm
             break
     if sendmail is None:
@@ -388,7 +391,7 @@ Overrides: %s
             print >>policyFile, """#<?cfg paf policy ?>
 execute: {
   shutdownTopic: "workflowShutdown"
-  eventBrokerHost: "lsst8.ncsa.uiuc.edu"
+  eventBrokerHost: """ + RunConfiguration.eventBrokerHost + """
 }
 framework: {
   exec: "$DATAREL_DIR/pipeline/PT1Pipe/joboffice-ImSim.sh"
@@ -449,7 +452,7 @@ deploy:  {
         with open("orca.paf", "w") as policyFile:
             print >>policyFile, """#<?cfg paf policy ?>
 shortName:           DataRelease
-eventBrokerHost:     lsst8.ncsa.uiuc.edu
+eventBrokerHost:     """ + RunConfiguration.eventBrokerHost + """
 repositoryDirectory: .
 productionShutdownTopic:       productionShutdown
 
