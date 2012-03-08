@@ -81,8 +81,9 @@ class RunConfiguration(object):
     version = 2
     sendmail = None
     for sm in ["/usr/sbin", "/usr/bin", "/sbin"]:
-        if os.access(os.path.join(sm, "sendmail"), os.X_OK):
-            sendmail = sm
+        cmd = os.path.join(sm, "sendmail")
+        if os.access(cmd, os.X_OK):
+            sendmail = cmd
             break
     if sendmail is None:
         raise RuntimeError("Unable to find sendmail executable")
