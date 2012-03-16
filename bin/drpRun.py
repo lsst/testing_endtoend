@@ -75,7 +75,7 @@ class RunConfiguration(object):
     lockBase = os.path.join(outputBase, "locks")
     collection = "PT1.2"
     spacePerCcd = int(160e6) # calexp only
-    version = 2
+    version = 3
     sendmail = None
     for sm in ["/usr/sbin/sendmail", "/usr/bin/sendmail", "/sbin/sendmail"]:
         if os.access(sm, os.X_OK):
@@ -152,6 +152,8 @@ class RunConfiguration(object):
                     (self.outputDirectory,))
         os.mkdir(self.outputDirectory)
         self.pipeQaUrl = RunConfiguration.pipeQaBase + self.dbName + "/"
+        self.lockFile = None
+        self.pid = os.getpid()
 
         self.eupsPath = os.environ['EUPS_PATH']
         e = eups.Eups(readCache=False)
@@ -283,12 +285,13 @@ Input: %s
 CCD count: %d
 Output: %s
 Database: %s
+PID: %d
 Overrides: %s
 """ % (RunConfiguration.version,
         self.runId, self.options.runType, self.user, self.dbUser,
         self.options.pipeline, os.environ["EUPS_PATH"],
         self.options.input, self.options.ccdCount, self.outputDirectory,
-        self.dbName, str(self.options.override))
+        self.dbName, self.pid, str(self.options.override))
 
         self.lockMachines()
         try:
@@ -373,8 +376,10 @@ Overrides: %s
         return os.path.join(RunConfiguration.lockBase, machineSet)
 
     def _log(self, message):
-        with open(self._lockName(self.machineSet), "a") as lockFile:
-            print >>lockFile, time.asctime(), message
+        if self.lockFile is None:
+            self.lockFile = open(self._lockName(self.machineSet), "a")
+        print >>self.lockFile, time.asctime(), message
+        self.lockFile.flush()
         print >>sys.stderr, time.asctime(), message
 
 ###############################################################################
@@ -589,6 +594,8 @@ workflow: {
                 (self.arch,))
 
     def unlockMachines(self):
+        if self.lockFile is not None:
+            self.lockFile.close()
         lockName = self._lockName(self.machineSet)
         if not os.access(lockName, os.R_OK):
             # Lock file no longer there...
@@ -766,21 +773,43 @@ workflow: {
         if self.machineSet is None:
             raise RuntimeError("No current run with runId " + runId)
         self._log("*** orca killed")
-        subprocess.check_call("$CTRL_ORCA_DIR/bin/shutprod.py 1 " + runId,
-                shell=True)
-        print >>sys.stderr, "waiting for production shutdown"
-        time.sleep(10)
-        print >>sys.stderr, "killing all remote processes"
-        for machine in RunConfiguration.machineSets[self.machineSet]:
-            machine = re.sub(r':.*', "", machine)
-            processes = subprocess.Popen(["ssh", machine, "/bin/ps", "-o",
-                "pid:6,command"], stdout=subprocess.PIPE)
-            for line in processes.stdout:
-                if line.find(runId) != -1:
-                    pid = line[0:6].strip()
-                    subprocess.check_call(["ssh", machine, "/bin/kill", pid])
-            processes.wait()
-        time.sleep(5)
+        self.lockFile.close()
+
+        orcaDone = False
+        pid = None
+        with open(self._lockName(self.machineSet), "r") as lockFile:
+            for line in lockFile:
+                if line.startswith("PID: "):
+                    pid = int(re.sub(r'PID:\s+', "", line.rstrip()))
+                if line.find("Orca run complete") != -1:
+                    orcaDone = True
+        if pid is None:
+            print >>sys.stderr, "lock file corrupted; trying to kill orca"
+        else:
+            try:
+                os.kill(pid, 9)
+                print >>sys.stderr, "killed drpRun.py process"
+             except:
+                pass
+
+        if not orcaDone:
+            subprocess.check_call("$CTRL_ORCA_DIR/bin/shutprod.py 1 " + runId,
+                    shell=True)
+            print >>sys.stderr, "waiting for production shutdown"
+            time.sleep(10)
+            print >>sys.stderr, "killing all remote processes"
+            for machine in RunConfiguration.machineSets[self.machineSet]:
+                machine = re.sub(r':.*', "", machine)
+                processes = subprocess.Popen(["ssh", machine, "/bin/ps", "-o",
+                    "pid:6,command"], stdout=subprocess.PIPE)
+                for line in processes.stdout:
+                    if line.find(runId) != -1:
+                        pid = line[0:6].strip()
+                        subprocess.check_call(["ssh", machine,
+                            "/bin/kill", pid])
+                processes.wait()
+            time.sleep(5)
+
         print >>sys.stderr, "unlocking machine set"
         self.unlockMachines()
 
