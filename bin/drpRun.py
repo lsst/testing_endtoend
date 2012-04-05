@@ -536,6 +536,7 @@ workflow: {
             from lsst.obs.lsstSim import LsstSimMapper
             butler = dafPersist.ButlerFactory(
                     mapper=LsstSimMapper(root=self.inputDirectory)).create()
+            numInputs = 0
             for sensorRef in butler.subset("raw", "sensor"):
                 numChannels = 0
                 for channelRef in sensorRef.subItems():
@@ -545,6 +546,9 @@ workflow: {
                         sensorRef.dataId
                 if numChannels == 32:
                     print >>inputFile, "raw", id
+                    numInputs += 1
+                    if numInputs >= self.options.ccdCount:
+                        break
                 else:
                     print >>sys.stderr, "Warning:", id, \
                             "has %d channel files (should be 32);" % \
