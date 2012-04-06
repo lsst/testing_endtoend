@@ -64,6 +64,7 @@ class RunConfiguration(object):
     dbHost = "lsst10.ncsa.uiuc.edu"
     dbPort = 3306
     eventBrokerHost = "lsst8.ncsa.illinois.edu"
+    defaultDomain = "ncsa.illinois.edu"
 
     # One extra process will be used on the first node for the JobOffice
     # Format = architecture-set number: ['machine name:number of processes']
@@ -175,6 +176,8 @@ class RunConfiguration(object):
                 machine = re.sub(r':.*', "", machine)
                 machines.update([machine])
         for machine in machines:
+            if machine.find(".") == -1:
+                machine = machine + "." + RunConfiguration.defaultDomain
             subprocess.check_call(["ssh", machine, "/bin/true"])
 
     def printStatus(self):
@@ -422,7 +425,7 @@ hw: {
 }
 
 deploy:  {
-    defaultDomain:  ncsa.illinois.edu
+    defaultDomain:  """ + RunConfiguration.defaultDomain + """
 """
             first = True
             for machine in RunConfiguration.machineSets[self.machineSet]:
@@ -788,6 +791,8 @@ workflow: {
         print >>sys.stderr, "killing all remote processes"
         for machine in RunConfiguration.machineSets[self.machineSet]:
             machine = re.sub(r':.*', "", machine)
+            if machine.find(".") == -1:
+                machine = machine + "." + RunConfiguration.defaultDomain
             processes = subprocess.Popen(["ssh", machine, "/bin/ps", "-o",
                 "pid:6,command"], stdout=subprocess.PIPE)
             for line in processes.stdout:
