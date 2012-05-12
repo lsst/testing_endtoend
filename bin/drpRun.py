@@ -77,7 +77,7 @@ class RunConfiguration(object):
     # These should generally be left unchanged
     runIdPattern = "%(runType)s_%(datetime)s"
     lockBase = os.path.join(outputBase, "locks")
-    collection = "PT1.2"
+    collection = "S12_lsstsim"
     spacePerCcd = int(160e6) # calexp only
     version = 2
     sendmail = None
@@ -674,43 +674,54 @@ workflow: {
     def doAdditionalJobs(self):
         os.mkdir("../SourceAssoc")
 
-        self._exec("$DATAREL_DIR/bin/sst/SourceAssoc_ImSim.py"
-                " -i ../output"
-                " -o ../SourceAssoc"
-                " -R ../output/registry.sqlite3",
+        self._exec("$PIPE_TASKS_DIR/bin/sourceAssoc.py "
+                "lsstSim ../output "
+                "--output ../SourceAssoc",
                 "SourceAssoc_ImSim.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
-                " -u %s -H %s %s" %
-                (self.dbUser, RunConfiguration.dbHost, self.dbName),
+                " --user=%s --host=%s --port=%s %s" %
+                (self.dbUser, RunConfiguration.dbHost,
+                 RunConfiguration.dbPort, self.dbName),
                 "prepareDb.log")
         self._log("prepareDb complete")
 
         os.chdir("..")
         self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_ImSim.py"
-                " -u %s -d %s"
-                " output output/registry.sqlite3" %
-                (self.dbUser, self.dbName),
+                " --user=%s --host=%s --port=%s --database=%s"
+                " --registry=output/registry.sqlite3"
+                " --strict"
+                " . output" %
+                (self.dbUser, RunConfiguration.dbHost,
+                 RunConfiguration.dbPort, self.dbName),
                 "run/ingestProcessed_ImSim.log")
         os.chdir("run")
         self._log("ingestProcessed complete")
         
         os.mkdir("../csv-SourceAssoc")
         self._exec("$DATAREL_DIR/bin/ingest/ingestSourceAssoc.py"
-                " -m"
-                " -u %s -H %s"
-                " -R ../input/refObject.csv"
-                " -e ../Science_Ccd_Exposure_Metadata.csv"
-                " -j 1"
-                " %s ../SourceAssoc ../csv-SourceAssoc" %
-                (self.dbUser, RunConfiguration.dbHost, self.dbName),
+                " --user=%s --host=%s --port=%s --database=%s"
+                " --strict --jobs=1 --create-views"
+                " ../csv-SourceAssoc ../SourceAssoc" %
+                (self.dbUser, RunConfiguration.dbHost,
+                 RunConfiguration.dbPort, self.dbName),
                 "ingestSourceAssoc.log")
         self._log("ingestSourceAssoc complete")
+        self._exec("$DATAREL_DIR/bin/ingest/referenceMatch.py"
+                " --user=%s --host=%s --port=%s --database=%s"
+                " --ref-catalog=../input/refObject.csv"
+                " --exposure-metadata=../Science_Ccd_Exposure_Metadata.csv"
+                " ../csv-SourceAssoc" %
+                (self.dbUser, RunConfiguration.dbHost,
+                 RunConfiguration.dbPort, self.dbName),
+                "referenceMatch.log")
+        self._log("referenceMatch complete")
         self._exec("$DATAREL_DIR/bin/ingest/finishDb.py"
-                " -u %s -H %s"
-                " -t"
+                " --user=%s --host=%s --port=%s"
+                " --transpose"
                 " %s" %
-                (self.dbUser, RunConfiguration.dbHost, self.dbName),
+                (self.dbUser, RunConfiguration.dbHost,
+                 RunConfiguration.dbPort, self.dbName),
                 "finishDb.log")
         self._log("finishDb complete")
 
@@ -745,9 +756,9 @@ workflow: {
         _checkWritable(self.options.output)
         latest = os.path.join(self.options.output,
                 "latest_" + self.options.runType)
-        if os.path.exists(latest + ".bak"):
+        if os.path.lexists(latest + ".bak"):
             os.unlink(latest + ".bak")
-        if os.path.exists(latest):
+        if os.path.lexists(latest):
             os.rename(latest, latest + ".bak")
         os.symlink(self.outputDirectory, latest)
 # TODO -- linkDb.py needs to be extended to take more run types
@@ -760,9 +771,9 @@ workflow: {
                 "latest_" + self.options.runType)
         qaDir = os.path.join(RunConfiguration.pipeQaDir, self.dbName)
         if os.path.exists(qaDir):
-            if os.path.exists(latest + ".bak"):
+            if os.path.lexists(latest + ".bak"):
                 os.unlink(latest + ".bak")
-            if os.path.exists(latest):
+            if os.path.lexists(latest):
                 os.rename(latest, latest + ".bak")
             os.symlink(qaDir, latest)
 
@@ -818,7 +829,7 @@ workflow: {
         if len(calexps) < 2:
             return False
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "output", "src", "v*", "R*", "S*.boost"))
+            "output", "src", "v*", "R*", "S*.fits"))
         return len(srcs) >= 2
 
 
