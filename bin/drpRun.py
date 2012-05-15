@@ -674,7 +674,7 @@ workflow: {
     def doAdditionalJobs(self):
         os.mkdir("../SourceAssoc")
 
-        self._exec("$PIPE_TASKS_DIR/bin/sourceAssoc.py "
+        self._exec("$AP_DIR/bin/sourceAssoc.py "
                 "lsstSim ../output "
                 "--output ../SourceAssoc",
                 "SourceAssoc_ImSim.log")
