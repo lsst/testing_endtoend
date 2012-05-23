@@ -57,7 +57,7 @@ class RunConfiguration(object):
 
     inputBase = "/lsst3/weekly/data"
     outputBase = "/lsst3/weekly/datarel-runs"
-    pipelinePolicy = "W2012Pipe/main.paf"
+    pipelinePolicy = "S2012Pipe/lsstSim.paf"
     toAddress = "lsst-devel-runs@lsstcorp.org"
     pipeQaBase = "http://lsst1.ncsa.illinois.edu/pipeQA/dev/"
     pipeQaDir = "/lsst/public_html/pipeQA/html/dev"
