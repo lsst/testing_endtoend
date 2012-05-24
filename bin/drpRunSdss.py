@@ -395,7 +395,7 @@ execute: {
   eventBrokerHost: """ + RunConfiguration.eventBrokerHost + """
 }
 framework: {
-  exec: "$DATAREL_DIR/pipeline/PT1Pipe/joboffice-ImSim.sh"
+  exec: "$DATAREL_DIR/pipeline/S2012Pipe/joboffice-sdss.sh"
   type: "standard"
   environment: unused
 }
@@ -470,7 +470,7 @@ database: {
         }
     }
 
-    configurationClass: lsst.ctrl.orca.db.DC3Configurator
+    configurationClass: lsst.ctrl.orca.db.SdssConfigurator
     configuration: {  
         globalDbName: GlobalDB
         dcVersion: """ + self.collectionName + """
@@ -812,12 +812,11 @@ workflow: {
         return False
 
     def checkForResults(self):
-        calexps = glob.glob(os.path.join(self.outputDirectory,
-            "output", "calexp", "v*", "R*", "S*.fits"))
-        if len(calexps) < 2:
-            return False
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "output", "src", "v*", "R*", "S*.fits"))
+            "output", "src", "*", "*", "src-*.fits"))
+        if len(srcs) < self.options.ccdCount:
+            print >>sys.stderr, "Warning: fewer sources than CCDs:", srcs, \
+                    self.options.ccdCount
         return len(srcs) >= 2
 
 
@@ -831,10 +830,11 @@ workflow: {
         import MySQLdb
         jobStartRegex = re.compile(
                 r"Processing job:"
-                r"(\s+raft=(?P<raft>\d,\d)"
-                r"|\s+sensor=(?P<sensor>\d,\d)"
-                r"|\s+type=calexp"
-                r"|\s+visit=(?P<visit>\d+)){4}"
+                r"(\s+band=(?P<band>\w)"
+                r"|\s+frame=(?P<frame>\d+)"
+                r"|\s+camcol=(?P<camcol>\d)"
+                r"|\s+run=(?P<run>\d+)"
+                r"|\s+type=calexp){5}"
         )
 
         host = RunConfiguration.dbHost
@@ -905,10 +905,10 @@ workflow: {
                     WHEN 4 THEN 'calexp writes'
                 END AS descr, COUNT(*) FROM (
                     SELECT CASE
-                        WHEN COMMENT LIKE 'Processing job:% visit=0'
+                        WHEN COMMENT LIKE 'Processing job:% band=0'
                         THEN 1
                         WHEN COMMENT LIKE 'Processing job:%'
-                            AND COMMENT NOT LIKE '% visit=0'
+                            AND COMMENT NOT LIKE '% band=0%'
                         THEN 2
                         WHEN COMMENT LIKE 'Ending write to BoostStorage%/src%'
                         THEN 3
@@ -990,9 +990,9 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
             for d in cursor.fetchall():
                 match = jobStartRegex.search(d['COMMENT'])
                 if match:
-                    jobs[d['workerid']] = "Visit %s Raft %s Sensor %s" % (
-                            match.group("visit"), match.group("raft"),
-                            match.group("sensor"))
+                    jobs[d['workerid']] = "Band %s Run %s Camcol %s Frame %s" % (
+                            match.group("band"), match.group("run"),
+                            match.group("camcol"), match.group("frame"))
                 elif not d['COMMENT'].startswith('Processing job:'):
                     if jobs.has_key(d['workerid']):
                         job = jobs[d['workerid']]
