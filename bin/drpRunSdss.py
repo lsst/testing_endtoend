@@ -550,14 +550,8 @@ workflow: {
     def generateEnvironment(self):
         with open("env.sh", "w") as envFile:
             # TODO -- change EUPS_PATH based on selected architecture
-            print >>envFile, "export EUPS_PATH=" + self.eupsPath
-            for dir in self.eupsPath.split(':'):
-                loadScript = os.path.join(dir, "loadLSST.sh")
-                if os.path.exists(loadScript):
-                    print >>envFile, "source", loadScript
-                    break
-            for pkg in sorted(self.setups.keys()):
-                print >>envFile, "setup -j", pkg, self.setups[pkg]
+            for k, v in os.environ.iteritems():
+                print >>envFile, "export %s='%s'" % (k, v)
 
         configDirectory = os.path.join(self.outputDirectory, "config")
         os.mkdir(configDirectory)
@@ -813,10 +807,10 @@ workflow: {
 
     def checkForResults(self):
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "output", "src", "*", "*", "src-*.fits"))
+            "output", "src", "*", "*", "*", "src-*.fits"))
         if len(srcs) < self.options.ccdCount:
-            print >>sys.stderr, "Warning: fewer sources than CCDs:", srcs, \
-                    self.options.ccdCount
+            print >>sys.stderr, "Warning: fewer sources than CCDs:", \
+                    len(srcs), '<', self.options.ccdCount
         return len(srcs) >= 2
 
 
@@ -905,7 +899,7 @@ workflow: {
                     WHEN 4 THEN 'calexp writes'
                 END AS descr, COUNT(*) FROM (
                     SELECT CASE
-                        WHEN COMMENT LIKE 'Processing job:% band=0'
+                        WHEN COMMENT LIKE 'Processing job:% band=0%'
                         THEN 1
                         WHEN COMMENT LIKE 'Processing job:%'
                             AND COMMENT NOT LIKE '% band=0%'
