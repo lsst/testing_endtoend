@@ -470,7 +470,7 @@ database: {
         }
     }
 
-    configurationClass: lsst.ctrl.orca.db.SdssConfigurator
+    configurationClass: lsst.ctrl.orca.db.DC3Configurator
     configuration: {  
         globalDbName: GlobalDB
         dcVersion: """ + self.collectionName + """

@@ -562,14 +562,8 @@ workflow: {
     def generateEnvironment(self):
         with open("env.sh", "w") as envFile:
             # TODO -- change EUPS_PATH based on selected architecture
-            print >>envFile, "export EUPS_PATH=" + self.eupsPath
-            for dir in self.eupsPath.split(':'):
-                loadScript = os.path.join(dir, "loadLSST.sh")
-                if os.path.exists(loadScript):
-                    print >>envFile, "source", loadScript
-                    break
-            for pkg in sorted(self.setups.keys()):
-                print >>envFile, "setup -j", pkg, self.setups[pkg]
+            for k, v in os.environ.iteritems():
+                print >>envFile, "export %s='%s'" % (k, v)
 
         configDirectory = os.path.join(self.outputDirectory, "config")
         os.mkdir(configDirectory)
