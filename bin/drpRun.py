@@ -674,6 +674,7 @@ workflow: {
                 "SourceAssoc_ImSim.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
+                " --camera=lsstSim"
                 " --user=%s --host=%s --port=%s %s" %
                 (self.dbUser, RunConfiguration.dbHost,
                  RunConfiguration.dbPort, self.dbName),
@@ -711,6 +712,7 @@ workflow: {
                 "referenceMatch.log")
         self._log("referenceMatch complete")
         self._exec("$DATAREL_DIR/bin/ingest/finishDb.py"
+                " --camera=lsstSim"
                 " --user=%s --host=%s --port=%s"
                 " --transpose"
                 " %s" %
