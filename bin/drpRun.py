@@ -78,7 +78,7 @@ class RunConfiguration(object):
     runIdPattern = "%(runType)s_%(datetime)s"
     lockBase = os.path.join(outputBase, "locks")
     collection = "S12_lsstsim"
-    spacePerCcd = int(650e6) # calexp and other outputs
+    spacePerCcd = int(160e6) # calexp primarily
     version = 2
     sendmail = None
     for sm in ["/usr/sbin", "/usr/bin", "/sbin"]:
