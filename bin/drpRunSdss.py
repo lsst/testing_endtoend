@@ -261,7 +261,7 @@ class RunConfiguration(object):
             conn = sqlite.connect(self.registryPath)
             self.options.ccdCount = conn.execute(
                     """SELECT COUNT(
-                    DISTINCT run||':'||band||':'||camcol||':'||frame)
+                    DISTINCT run||':'||filter||':'||camcol||':'||field)
                     FROM raw;""").fetchone()[0]
         if self.options.ccdCount < 2:
             raise RuntimeError("Must process at least two CCDs")
@@ -531,21 +531,21 @@ workflow: {
 
     def generateInputList(self):
         with open("ccdlist", "w") as inputFile:
-            print >>inputFile, ">intids run camcol frame"
+            print >>inputFile, ">intids run camcol field"
             import lsst.daf.persistence as dafPersist
             from lsst.obs.sdss import SdssMapper
             butler = dafPersist.ButlerFactory(
                     mapper=SdssMapper(root=self.inputDirectory)).create()
             numInputs = 0
-            for frameRef in butler.subset("fpC", "band"):
+            for frameRef in butler.subset("fpC", "filter"):
                 print >>inputFile, "raw", \
-                        "run=%(run)d band=%(band)s camcol=%(camcol)d frame=%(frame)d" % \
+                        "run=%(run)d filter=%(filter)s camcol=%(camcol)d field=%(field)d" % \
                         frameRef.dataId
                 numInputs += 1
                 if numInputs >= self.options.ccdCount:
                     break
             for i in xrange(self.nPipelines):
-                print >>inputFile, "raw run=0 band=0 camcol=0 frame=0"
+                print >>inputFile, "raw run=0 filter=0 camcol=0 field=0"
 
     def generateEnvironment(self):
         with open("env.sh", "w") as envFile:
@@ -827,8 +827,8 @@ workflow: {
         import MySQLdb
         jobStartRegex = re.compile(
                 r"Processing job:"
-                r"(\s+band=(?P<band>\w)"
-                r"|\s+frame=(?P<frame>\d+)"
+                r"(\s+filter=(?P<filter>\w)"
+                r"|\s+field=(?P<field>\d+)"
                 r"|\s+camcol=(?P<camcol>\d)"
                 r"|\s+run=(?P<run>\d+)"
                 r"|\s+type=calexp){5}"
@@ -902,10 +902,10 @@ workflow: {
                     WHEN 4 THEN 'calexp writes'
                 END AS descr, COUNT(*) FROM (
                     SELECT CASE
-                        WHEN COMMENT LIKE 'Processing job:% band=0%'
+                        WHEN COMMENT LIKE 'Processing job:% filter=0%'
                         THEN 1
                         WHEN COMMENT LIKE 'Processing job:%'
-                            AND COMMENT NOT LIKE '% band=0%'
+                            AND COMMENT NOT LIKE '% filter=0%'
                         THEN 2
                         WHEN COMMENT LIKE 'Ending write to BoostStorage%/src%'
                         THEN 3
@@ -988,8 +988,8 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
                 match = jobStartRegex.search(d['COMMENT'])
                 if match:
                     jobs[d['workerid']] = "Band %s Run %s Camcol %s Frame %s" % (
-                            match.group("band"), match.group("run"),
-                            match.group("camcol"), match.group("frame"))
+                            match.group("filter"), match.group("run"),
+                            match.group("camcol"), match.group("field"))
                 elif not d['COMMENT'].startswith('Processing job:'):
                     if jobs.has_key(d['workerid']):
                         job = jobs[d['workerid']]
