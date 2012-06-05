@@ -692,6 +692,7 @@ workflow: {
         self._log("ingestSourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/referenceMatch.py"
                 " --user=%s --host=%s --port=%s --database=%s"
+                " --camera=sdss"
                 " --ref-catalog=../input/refObject.csv"
                 " --exposure-metadata=../Science_Ccd_Exposure_Metadata.csv"
                 " ../csv-SourceAssoc" %
