@@ -670,7 +670,7 @@ workflow: {
         self._log("prepareDb complete")
 
         os.chdir("..")
-        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_Sdss.py"
+        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_sdss.py"
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --registry=output/registry.sqlite3"
                 " --strict"
@@ -809,7 +809,7 @@ workflow: {
 
     def checkForResults(self):
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "output", "src", "*", "*", "*", "src-*.fits"))
+            "output", "fpC-results", "*", "*", "*", "src", "src-*.fits"))
         if len(srcs) < self.options.ccdCount:
             print >>sys.stderr, "Warning: fewer sources than CCDs:", \
                     len(srcs), '<', self.options.ccdCount
