@@ -658,7 +658,7 @@ workflow: {
 
         self._exec("$AP_DIR/bin/sourceAssoc.py "
                 "sdss ../output "
-                "--output ../SourceAssoc",
+                "--doraise --output ../SourceAssoc",
                 "SourceAssoc_ImSim.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
