@@ -717,6 +717,7 @@ workflow: {
         self._exec("$TESTING_DISPLAYQA_DIR/bin/newQa.py " + self.dbName,
                 "newQa.log")
         self._exec("$TESTING_PIPEQA_DIR/bin/pipeQa.py"
+                " --camera sdss"
                 " --delaySummary"
                 " --forkFigure"
                 " --keep"
@@ -810,7 +811,7 @@ workflow: {
 
     def checkForResults(self):
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "output", "fpC-results", "*", "*", "*", "src", "src-*.fits"))
+            "output", "sci-results", "*", "*", "*", "src", "src-*.fits"))
         if len(srcs) < self.options.ccdCount:
             print >>sys.stderr, "Warning: fewer sources than CCDs:", \
                     len(srcs), '<', self.options.ccdCount
