@@ -94,6 +94,11 @@ class RunConfiguration(object):
     def __init__(self, args):
         self.datetime = time.strftime("%Y_%m%d_%H%M%S")
         self.user = os.getlogin()
+        if self.user == 'buildbot':
+            RunConfiguration.pipeQaBase = re.sub(r'dev', 'buildbot',
+                    RunConfiguration.pipeQaBase)
+            RunConfiguration.pipeQaDir = re.sub(r'dev', 'buildbot',
+                    RunConfiguration.pipeQaDir)
         self.dbUser = DbAuth.username(RunConfiguration.dbHost,
                 str(RunConfiguration.dbPort))
         self.hostname = socket.getfqdn()
