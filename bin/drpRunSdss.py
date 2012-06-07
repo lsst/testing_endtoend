@@ -55,9 +55,9 @@ class RunConfiguration(object):
     # Configuration information
     ###########################################################################
 
-    inputBase = "/lsst3/weekly/data"
+    inputBase = "/lsst7/stripe82/weekly/data"
     outputBase = "/lsst3/weekly/datarel-runs"
-    pipelinePolicy = "S2012Pipe/lsstSim.paf"
+    pipelinePolicy = "S2012Pipe/sdss.paf"
     toAddress = "lsst-devel-runs@lsstcorp.org"
     pipeQaBase = "http://lsst1.ncsa.illinois.edu/pipeQA/dev/"
     pipeQaDir = "/lsst/public_html/pipeQA/html/dev"
@@ -77,8 +77,8 @@ class RunConfiguration(object):
     # These should generally be left unchanged
     runIdPattern = "%(runType)s_%(datetime)s"
     lockBase = os.path.join(outputBase, "locks")
-    collection = "S12_lsstsim"
-    spacePerCcd = int(160e6) # calexp primarily
+    collection = "S12_sdss"
+    spacePerCcd = int(160e6) # calexp only
     version = 2
     sendmail = None
     for sm in ["/usr/sbin", "/usr/bin", "/sbin"]:
@@ -94,11 +94,6 @@ class RunConfiguration(object):
     def __init__(self, args):
         self.datetime = time.strftime("%Y_%m%d_%H%M%S")
         self.user = os.getlogin()
-        if self.user == 'buildbot':
-            RunConfiguration.pipeQaBase = re.sub(r'dev', 'buildbot',
-                    RunConfiguration.pipeQaBase)
-            RunConfiguration.pipeQaDir = re.sub(r'dev', 'buildbot',
-                    RunConfiguration.pipeQaDir)
         self.dbUser = DbAuth.username(RunConfiguration.dbHost,
                 str(RunConfiguration.dbPort))
         self.hostname = socket.getfqdn()
@@ -248,8 +243,8 @@ class RunConfiguration(object):
         for requiredPackage in ['ctrl_orca', 'datarel', 'astrometry_net_data']:
             if not self.setups.has_key(requiredPackage):
                 raise RuntimeError(requiredPackage + " is not setup")
-        if self.setups['astrometry_net_data'].find('imsim') == -1:
-            raise RuntimeError("Non-imsim astrometry_net_data is setup")
+        if self.setups['astrometry_net_data'].find('sdss') == -1:
+            raise RuntimeError("Non-sdss astrometry_net_data is setup")
         if not self.setups.has_key('testing_pipeQA'):
             print >>sys.stderr, "testing_pipeQA not setup, will skip pipeQA"
             self.options.doPipeQa = False
@@ -258,10 +253,6 @@ class RunConfiguration(object):
             self.options.doPipeQa = False
 
         _checkReadable(self.inputDirectory)
-        _checkReadable(os.path.join(self.inputDirectory, "bias"))
-        _checkReadable(os.path.join(self.inputDirectory, "dark"))
-        _checkReadable(os.path.join(self.inputDirectory, "flat"))
-        _checkReadable(os.path.join(self.inputDirectory, "raw"))
         _checkReadable(os.path.join(self.inputDirectory, "refObject.csv"))
         self.registryPath = os.path.join(self.inputDirectory, "registry.sqlite3")
         _checkReadable(self.registryPath)
@@ -269,7 +260,8 @@ class RunConfiguration(object):
         if self.options.ccdCount is None:
             conn = sqlite.connect(self.registryPath)
             self.options.ccdCount = conn.execute(
-                    """SELECT COUNT(DISTINCT visit||':'||raft||':'||sensor)
+                    """SELECT COUNT(
+                    DISTINCT run||':'||filter||':'||camcol||':'||field)
                     FROM raw;""").fetchone()[0]
         if self.options.ccdCount < 2:
             raise RuntimeError("Must process at least two CCDs")
@@ -403,7 +395,7 @@ execute: {
   eventBrokerHost: """ + RunConfiguration.eventBrokerHost + """
 }
 framework: {
-  exec: "$DATAREL_DIR/pipeline/PT1Pipe/joboffice-ImSim.sh"
+  exec: "$DATAREL_DIR/pipeline/S2012Pipe/joboffice-sdss.sh"
   type: "standard"
   environment: unused
 }
@@ -539,30 +531,21 @@ workflow: {
 
     def generateInputList(self):
         with open("ccdlist", "w") as inputFile:
-            print >>inputFile, ">intids visit"
+            print >>inputFile, ">intids run camcol field"
             import lsst.daf.persistence as dafPersist
-            from lsst.obs.lsstSim import LsstSimMapper
+            from lsst.obs.sdss import SdssMapper
             butler = dafPersist.ButlerFactory(
-                    mapper=LsstSimMapper(root=self.inputDirectory)).create()
+                    mapper=SdssMapper(root=self.inputDirectory)).create()
             numInputs = 0
-            for sensorRef in butler.subset("raw", "sensor"):
-                numChannels = 0
-                for channelRef in sensorRef.subItems():
-                    if butler.datasetExists("raw", channelRef.dataId):
-                        numChannels += 1
-                id = "visit=%(visit)d raft=%(raft)s sensor=%(sensor)s" % \
-                        sensorRef.dataId
-                if numChannels == 32:
-                    print >>inputFile, "raw", id
-                    numInputs += 1
-                    if numInputs >= self.options.ccdCount:
-                        break
-                else:
-                    print >>sys.stderr, "Warning:", id, \
-                            "has %d channel files (should be 32);" % \
-                            (numChannels,), "not processing"
+            for frameRef in butler.subset("fpC", "filter"):
+                print >>inputFile, "raw", \
+                        "run=%(run)d filter=%(filter)s camcol=%(camcol)d field=%(field)d" % \
+                        frameRef.dataId
+                numInputs += 1
+                if numInputs >= self.options.ccdCount:
+                    break
             for i in xrange(self.nPipelines):
-                print >>inputFile, "raw visit=0 raft=0 sensor=0"
+                print >>inputFile, "raw run=0 filter=0 camcol=0 field=0"
 
     def generateEnvironment(self):
         with open("env.sh", "w") as envFile:
@@ -674,12 +657,12 @@ workflow: {
         os.mkdir("../SourceAssoc")
 
         self._exec("$AP_DIR/bin/sourceAssoc.py "
-                "lsstSim ../output "
+                "sdss ../output "
                 "--doraise --output ../SourceAssoc",
                 "SourceAssoc_ImSim.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
-                " --camera=lsstSim"
+                " --camera=sdss"
                 " --user=%s --host=%s --port=%s %s" %
                 (self.dbUser, RunConfiguration.dbHost,
                  RunConfiguration.dbPort, self.dbName),
@@ -687,7 +670,7 @@ workflow: {
         self._log("prepareDb complete")
 
         os.chdir("..")
-        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_ImSim.py"
+        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_sdss.py"
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --registry=output/registry.sqlite3"
                 " --strict"
@@ -709,6 +692,7 @@ workflow: {
         self._log("ingestSourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/referenceMatch.py"
                 " --user=%s --host=%s --port=%s --database=%s"
+                " --camera=sdss"
                 " --ref-catalog=../input/refObject.csv"
                 " --exposure-metadata=../Science_Ccd_Exposure_Metadata.csv"
                 " ../csv-SourceAssoc" %
@@ -717,7 +701,7 @@ workflow: {
                 "referenceMatch.log")
         self._log("referenceMatch complete")
         self._exec("$DATAREL_DIR/bin/ingest/finishDb.py"
-                " --camera=lsstSim"
+                " --camera=sdss"
                 " --user=%s --host=%s --port=%s"
                 " --transpose"
                 " %s" %
@@ -733,6 +717,7 @@ workflow: {
         self._exec("$TESTING_DISPLAYQA_DIR/bin/newQa.py " + self.dbName,
                 "newQa.log")
         self._exec("$TESTING_PIPEQA_DIR/bin/pipeQa.py"
+                " --camera sdss"
                 " --delaySummary"
                 " --forkFigure"
                 " --keep"
@@ -825,12 +810,11 @@ workflow: {
         return False
 
     def checkForResults(self):
-        calexps = glob.glob(os.path.join(self.outputDirectory,
-            "output", "calexp", "v*", "R*", "S*.fits"))
-        if len(calexps) < 2:
-            return False
         srcs = glob.glob(os.path.join(self.outputDirectory,
-            "output", "src", "v*", "R*", "S*.fits"))
+            "output", "sci-results", "*", "*", "*", "src", "src-*.fits"))
+        if len(srcs) < self.options.ccdCount:
+            print >>sys.stderr, "Warning: fewer sources than CCDs:", \
+                    len(srcs), '<', self.options.ccdCount
         return len(srcs) >= 2
 
 
@@ -844,10 +828,11 @@ workflow: {
         import MySQLdb
         jobStartRegex = re.compile(
                 r"Processing job:"
-                r"(\s+raft=(?P<raft>\d,\d)"
-                r"|\s+sensor=(?P<sensor>\d,\d)"
-                r"|\s+type=calexp"
-                r"|\s+visit=(?P<visit>\d+)){4}"
+                r"(\s+filter=(?P<filter>\w)"
+                r"|\s+field=(?P<field>\d+)"
+                r"|\s+camcol=(?P<camcol>\d)"
+                r"|\s+run=(?P<run>\d+)"
+                r"|\s+type=calexp){5}"
         )
 
         host = RunConfiguration.dbHost
@@ -918,10 +903,10 @@ workflow: {
                     WHEN 4 THEN 'calexp writes'
                 END AS descr, COUNT(*) FROM (
                     SELECT CASE
-                        WHEN COMMENT LIKE 'Processing job:% visit=0'
+                        WHEN COMMENT LIKE 'Processing job:% filter=0%'
                         THEN 1
                         WHEN COMMENT LIKE 'Processing job:%'
-                            AND COMMENT NOT LIKE '% visit=0'
+                            AND COMMENT NOT LIKE '% filter=0%'
                         THEN 2
                         WHEN COMMENT LIKE 'Ending write to BoostStorage%/src%'
                         THEN 3
@@ -1003,9 +988,9 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
             for d in cursor.fetchall():
                 match = jobStartRegex.search(d['COMMENT'])
                 if match:
-                    jobs[d['workerid']] = "Visit %s Raft %s Sensor %s" % (
-                            match.group("visit"), match.group("raft"),
-                            match.group("sensor"))
+                    jobs[d['workerid']] = "Band %s Run %s Camcol %s Frame %s" % (
+                            match.group("filter"), match.group("run"),
+                            match.group("camcol"), match.group("field"))
                 elif not d['COMMENT'].startswith('Processing job:'):
                     if jobs.has_key(d['workerid']):
                         job = jobs[d['workerid']]
@@ -1137,7 +1122,7 @@ Uses the current stack and setup package versions.""")
         input = None
         for entry in sorted(os.listdir(RunConfiguration.inputBase),
                 reverse=True):
-            if entry.startswith("obs_imSim"):
+            if entry.startswith("sdss"):
                 input = entry
                 break
 
