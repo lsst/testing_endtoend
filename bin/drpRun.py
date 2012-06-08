@@ -676,10 +676,7 @@ workflow: {
         for env in glob.glob(os.path.join(self.outputDirectory,
             "work", "*", "eups-env.txt")):
             try:
-                # Filter out SCM for buildbot
-                subprocess.check_call(
-                        "perl -pe 's/SCM //;' %s | diff - %s" % (tags, env),
-                        shell=True)
+                subprocess.check_call(["/usr/bin/diff", tags, env])
             except subprocess.CalledProcessError:
                 print >>sys.stderr, "*** Mismatched setup", env
                 raise
