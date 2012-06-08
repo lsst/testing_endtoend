@@ -581,7 +581,8 @@ workflow: {
         with open("env.sh", "w") as envFile:
             # TODO -- change EUPS_PATH based on selected architecture
             for k, v in os.environ.iteritems():
-                print >>envFile, "export %s='%s'" % (k, v)
+                if re.search(r'_DIR|SETUP_|LSST|EUPS|PATH', k):
+                    print >>envFile, "export %s=%s" % (k, repr(v))
 
         configDirectory = os.path.join(self.outputDirectory, "config")
         os.mkdir(configDirectory)
