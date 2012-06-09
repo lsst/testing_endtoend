@@ -35,8 +35,8 @@ import tempfile
 import time
 
 import eups
-# import lsst.pex.policy as pexPolicy
 from lsst.daf.persistence import DbAuth
+import lsst.pex.config as pexConfig
 
 def _checkReadable(path):
     if not os.access(path, os.R_OK):
@@ -49,22 +49,76 @@ def _checkWritable(path):
 class NoMatchError(RuntimeError):
     pass
 
-class RunConfiguration(object):
+class CameraConfig(pexConfig.Config):
+    inputBase = Field("Base directory for input repositories", str,
+            check=lambda x: os.path.isdir(x) and os.access(x, os.R_OK))
+    pipelinePolicy = Field("Policy file for processCcd pipeline", str,
+            check=lambda x: x.endswith(".paf") and os.access(x, os.R_OK))
+    collection = Field("Input data collection name and output database type",
+            str)
+    spacePerCcd = Field("Amount of space used for outputs per input dataset",
+            int)
+    dataIds = ListField("Names of data identifiers", str)
+    intIds = ListField("Names of integer data identifiers", str)
+    jobOffice = Field("Name of JobOffice shell script", str)
+    mapperModule = Field("Module to import mapper from", str)
+    mapperClass = Field("Class of camera mapper", str)
+    ingestProcessed = Field("Processed exposure metadata ingestion script",
+            str, check=lambda x: x.endswith(".py") and os.access(x, os.X_OK))
+
+class LsstSimCameraConfig(CameraConfig):
+    def setDefaults(self):
+        inputBase = "/lsst3/weekly/data"
+        pipelinePolicy = "S2012Pipe/lsstSim.paf"
+        collection="S12_lsstsim"
+        spacePerCcd = int(160e6)
+        dataIds = ["visit", "raft", "sensor"]
+        intIds = ["visit"]
+        jobOffice = "$DATAREL_DIR/pipeline/PT1Pipe/joboffice-ImSim.sh"
+        mapperModule = "lsst.obs.lsstSim"
+        mapperClass = "LsstSimMapper"
+        ingestProcessed = "$DATAREL_DIR/bin/ingest/ingestProcessed_ImSim.py"
+
+class SdssCameraConfig(CameraDrpRunBaseConfig):
+    def setDefaults(self):
+        inputBase = "/lsst7/stripe82/weekly/data"
+        pipelinePolicy = "S2012Pipe/sdss.paf"
+        collection="S12_sdss"
+        spacePerCcd = int(30e6)
+        dataIds = ["run", "filter", "camcol", "field"]
+        intIds = ["run", "camcol", "field"]
+        jobOffice = "$DATAREL_DIR/pipeline/S2012Pipe/joboffice-sdss.sh"
+        mapperModule = "lsst.obs.sdss"
+        mapperClass = "SdssMapper"
+        ingestProcessed = "$DATAREL_DIR/bin/ingest/ingestProcessed_sdss.py"
+
+class DrpRunConfig(pexConfig.Config):
+    camera = ConfigChoiceField("Per-camera configuration",
+            dict(lsstSim=LsstSimCameraConfig, sdss=SdssCameraConfig))
+    outputBase = Field("Base directory for output repositories", str,
+            check=lambda x: os.path.isdir(x) and os.access(x, os.W_OK))
+    toAddress = Field("Status E-mail address", str,
+            default="lsst-devel-runs@lsstcorp.org")
+    pipeQaBase = Field("Base URL for pipeQA output", str,
+            default="http://lsst1.ncsa.illinois.edu/pipeQA/dev")
+    pipeQaDir = Field("Directory for pipeQA outputs", str,
+            default="/lsst/public_html/pipeQA/html/dev",
+            check=lambda x: os.path.isdir(x) and os.access(x, os.W_OK))
+    dbHost = Field("MySQL database hostname", str,
+            default="lsst10.ncsa.uiuc.edu")
+    dbPort = Field("MySQL database port", int, default=3306)
+    eventBrokerHost = Field("Event broker hostname", str,
+            default="lsst8.ncsa.illinois.edu")
+    defaultDomain = Field("Default worker node domain name", str,
+            default="ncsa.illinois.edu")
+    runIdPattern = Field("Pattern for generating runid using runInfo tokens",
+            str, default="%(runType)s_%(datetime)s")
+
+class DrpRunner(object):
 
     ###########################################################################
     # Configuration information
     ###########################################################################
-
-    inputBase = "/lsst3/weekly/data"
-    outputBase = "/lsst3/weekly/datarel-runs"
-    pipelinePolicy = "S2012Pipe/lsstSim.paf"
-    toAddress = "lsst-devel-runs@lsstcorp.org"
-    pipeQaBase = "http://lsst1.ncsa.illinois.edu/pipeQA/dev/"
-    pipeQaDir = "/lsst/public_html/pipeQA/html/dev"
-    dbHost = "lsst10.ncsa.uiuc.edu"
-    dbPort = 3306
-    eventBrokerHost = "lsst8.ncsa.illinois.edu"
-    defaultDomain = "ncsa.illinois.edu"
 
     # One extra process will be used on the first node for the JobOffice
     # Format = architecture-set number: ['machine name:number of processes']
@@ -76,9 +130,6 @@ class RunConfiguration(object):
 
     # These should generally be left unchanged
     runIdPattern = "%(runType)s_%(datetime)s"
-    lockBase = os.path.join(outputBase, "locks")
-    collection = "S12_lsstsim"
-    spacePerCcd = int(160e6) # calexp primarily
     version = 2
     sendmail = None
     for sm in ["/usr/sbin", "/usr/bin", "/sbin"]:
@@ -92,19 +143,28 @@ class RunConfiguration(object):
     ###########################################################################
 
     def __init__(self, args):
+        self.config = DrpRunConfig()
+        if args[1] not in self.config.camera:
+            raise RuntimeError("Invalid camera: " + args[1])
+        self.camera = args[1]
+        self.config.camera.active = self.camera
+
+        self.lockBase = os.path.join(self.config.outputBase, "locks")
         self.datetime = time.strftime("%Y_%m%d_%H%M%S")
         self.user = os.getlogin()
         if self.user == 'buildbot':
-            RunConfiguration.pipeQaBase = re.sub(r'dev', 'buildbot',
-                    RunConfiguration.pipeQaBase)
-            RunConfiguration.pipeQaDir = re.sub(r'dev', 'buildbot',
-                    RunConfiguration.pipeQaDir)
-        self.dbUser = DbAuth.username(RunConfiguration.dbHost,
-                str(RunConfiguration.dbPort))
+            self.config.pipeQaBase = re.sub(r'dev', 'buildbot',
+                    self.config.pipeQaBase)
+            self.config.pipeQaDir = re.sub(r'dev', 'buildbot',
+                    self.config.pipeQaDir)
+        self.dbUser = DbAuth.username(self.config.dbHost,
+                str(self.config.dbPort))
         self.hostname = socket.getfqdn()
         self.fromAddress = "%s@%s" % (self.user, self.hostname)
 
         self.options, self.args = self.parseOptions(args)
+
+        self.config.validate()
 
         # Handle immediate commands
         if self.options.printStatus:
@@ -139,29 +199,29 @@ class RunConfiguration(object):
             raise RuntimeError("Run type '%s' must be one word" %
                     (self.options.runType,))
 
-        self.collectionName = re.sub(r'\.', '_', RunConfiguration.collection)
+        self.collectionName = re.sub(r'\.', '_', self.config.camera.collection)
         runIdProperties = dict(
                 user=self.user,
                 dbUser=self.dbUser,
                 coll=self.collectionName,
                 runType=self.options.runType,
                 datetime=self.datetime)
-        self.runId = RunConfiguration.runIdPattern % runIdProperties
+        self.runId = self.config.runIdPattern % runIdProperties
         runIdProperties['runid'] = self.runId
         dbNamePattern = "%(dbUser)s_%(coll)s_u_%(runid)s"
         self.dbName = dbNamePattern % runIdProperties
 
-        self.inputBase = os.path.join(RunConfiguration.inputBase,
+        self.inputBase = os.path.join(self.config.camera.inputBase,
                 self.options.input)
         self.inputDirectory = os.path.join(self.inputBase,
-                RunConfiguration.collection)
+                self.config.camera.collection)
         self.outputDirectory = os.path.join(self.options.output, self.runId)
         self.outputDirectory = os.path.abspath(self.outputDirectory)
         if os.path.exists(self.outputDirectory):
             raise RuntimeError("Output directory %s already exists" %
                     (self.outputDirectory,))
         os.mkdir(self.outputDirectory)
-        self.pipeQaUrl = RunConfiguration.pipeQaBase + self.dbName + "/"
+        self.pipeQaUrl = self.config.pipeQaBase + self.dbName + "/"
 
         self.eupsPath = os.environ['EUPS_PATH']
         e = eups.Eups(readCache=False)
@@ -176,22 +236,22 @@ class RunConfiguration(object):
 
     def hosts(self):
         machines = set()
-        for machineSet in RunConfiguration.machineSets.itervalues():
+        for machineSet in DrpRunner.machineSets.itervalues():
             for machine in machineSet:
                 machine = re.sub(r':.*', "", machine)
                 machines.update([machine])
         for machine in machines:
             if machine.find(".") == -1:
-                machine = machine + "." + RunConfiguration.defaultDomain
+                machine = machine + "." + self.config.defaultDomain
             subprocess.check_call(["ssh", machine, "/bin/true"])
 
     def printStatus(self):
-        machineSets = RunConfiguration.machineSets.keys()
+        machineSets = DrpRunner.machineSets.keys()
         machineSets.sort()
         for k in machineSets:
             lockFile = self._lockName(k)
             if os.path.exists(lockFile):
-                print "*** Machine set", k, str(RunConfiguration.machineSets[k])
+                print "*** Machine set", k, str(DrpRunner.machineSets[k])
                 self.report(lockFile)
 
     def report(self, logFile):
@@ -231,9 +291,9 @@ class RunConfiguration(object):
         return result
 
     def listInputs(self):
-        for path in sorted(os.listdir(RunConfiguration.inputBase)):
-            if os.path.exists(os.path.join(RunConfiguration.inputBase, path,
-                RunConfiguration.collection)):
+        for path in sorted(os.listdir(self.config.camera.inputBase)):
+            if os.path.exists(os.path.join(self.config.camera.inputBase, path,
+                self.config.camera.collection)):
                 print path
 
     def listRuns(self, partialId):
@@ -248,7 +308,7 @@ class RunConfiguration(object):
         for requiredPackage in ['ctrl_orca', 'datarel', 'astrometry_net_data']:
             if not self.setups.has_key(requiredPackage):
                 raise RuntimeError(requiredPackage + " is not setup")
-        if self.setups['astrometry_net_data'].find('imsim') == -1:
+        if self.setups['astrometry_net_data'].find(self.camera.lower()) == -1:
             raise RuntimeError("Non-imsim astrometry_net_data is setup")
         if not self.setups.has_key('testing_pipeQA'):
             print >>sys.stderr, "testing_pipeQA not setup, will skip pipeQA"
@@ -258,10 +318,11 @@ class RunConfiguration(object):
             self.options.doPipeQa = False
 
         _checkReadable(self.inputDirectory)
-        _checkReadable(os.path.join(self.inputDirectory, "bias"))
-        _checkReadable(os.path.join(self.inputDirectory, "dark"))
-        _checkReadable(os.path.join(self.inputDirectory, "flat"))
-        _checkReadable(os.path.join(self.inputDirectory, "raw"))
+        if self.camera == "lsstSim":
+            _checkReadable(os.path.join(self.inputDirectory, "bias"))
+            _checkReadable(os.path.join(self.inputDirectory, "dark"))
+            _checkReadable(os.path.join(self.inputDirectory, "flat"))
+            _checkReadable(os.path.join(self.inputDirectory, "raw"))
         _checkReadable(os.path.join(self.inputDirectory, "refObject.csv"))
         self.registryPath = os.path.join(self.inputDirectory, "registry.sqlite3")
         _checkReadable(self.registryPath)
@@ -269,15 +330,15 @@ class RunConfiguration(object):
         if self.options.ccdCount is None:
             conn = sqlite.connect(self.registryPath)
             self.options.ccdCount = conn.execute(
-                    """SELECT COUNT(DISTINCT visit||':'||raft||':'||sensor)
-                    FROM raw;""").fetchone()[0]
+                    "SELECT COUNT(DISTINCT %s) FROM raw;" %
+                    ("||':'".join(self.config.camera.dataIds),)).fetchone()[0]
         if self.options.ccdCount < 2:
             raise RuntimeError("Must process at least two CCDs")
 
         _checkWritable(self.outputDirectory)
         result = os.statvfs(self.outputDirectory)
         availableSpace = result.f_bavail * result.f_bsize
-        minimumSpace = int(RunConfiguration.spacePerCcd * self.options.ccdCount)
+        minimumSpace = int(self.config.camera.spacePerCcd * self.options.ccdCount)
         if availableSpace < minimumSpace:
             raise RuntimeError("Insufficient disk space in output filesystem:\n"
                     "%d available, %d needed" %
@@ -296,7 +357,7 @@ CCD count: %d
 Output: %s
 Database: %s
 Overrides: %s
-""" % (RunConfiguration.version,
+""" % (DrpRunner.version,
         self.runId, self.options.runType, self.user, self.dbUser,
         self.options.pipeline, os.environ["EUPS_PATH"],
         self.options.input, self.options.ccdCount, self.outputDirectory,
@@ -387,7 +448,7 @@ Overrides: %s
         msg['From'] = self.fromAddress
         msg['To'] = self.options.toAddress
 
-        mail = subprocess.Popen([RunConfiguration.sendmail,
+        mail = subprocess.Popen([DrpRunner.sendmail,
             "-t", "-f", self.fromAddress], stdin=subprocess.PIPE)
         try:
             print >>mail.stdin, msg
@@ -395,7 +456,7 @@ Overrides: %s
             mail.stdin.close()
 
     def _lockName(self, machineSet):
-        return os.path.join(RunConfiguration.lockBase, machineSet)
+        return os.path.join(self.lockBase, machineSet)
 
     def _log(self, message):
         with open(self._lockName(self.machineSet), "a") as lockFile:
@@ -413,10 +474,10 @@ Overrides: %s
             print >>policyFile, """#<?cfg paf policy ?>
 execute: {
   shutdownTopic: "workflowShutdown"
-  eventBrokerHost: """ + RunConfiguration.eventBrokerHost + """
+  eventBrokerHost: """ + self.config.eventBrokerHost + """
 }
 framework: {
-  exec: "$DATAREL_DIR/pipeline/PT1Pipe/joboffice-ImSim.sh"
+  exec: """ + '"' + self.config.camera.jobOffice + '"' + """
   type: "standard"
   environment: unused
 }
@@ -443,10 +504,10 @@ hw: {
 }
 
 deploy:  {
-    defaultDomain:  """ + RunConfiguration.defaultDomain + """
+    defaultDomain:  """ + self.config.defaultDomain + """
 """
             first = True
-            for machine in RunConfiguration.machineSets[self.machineSet]:
+            for machine in DrpRunner.machineSets[self.machineSet]:
                 if first:
                     processes = int(re.sub(r'.*:', "", machine)) + 1
                     jobOfficeMachine = re.sub(r':.*', "", machine)
@@ -474,7 +535,7 @@ deploy:  {
         with open("orca.paf", "w") as policyFile:
             print >>policyFile, """#<?cfg paf policy ?>
 shortName:           DataRelease
-eventBrokerHost:     """ + RunConfiguration.eventBrokerHost + """
+eventBrokerHost:     """ + self.config.eventBrokerHost + """
 repositoryDirectory: .
 productionShutdownTopic:       productionShutdown
 
@@ -482,8 +543,8 @@ database: {
     name: dc3bGlobal
     system: {   
         authInfo: {
-            host: """ + RunConfiguration.dbHost + """
-            port: """ + str(RunConfiguration.dbPort) + """
+            host: """ + self.config.dbHost + """
+            port: """ + str(self.config.dbPort) + """
         }
         runCleanup: {
             daysFirstNotice: 7  # days when first notice is sent before run can be deleted
@@ -513,7 +574,7 @@ workflow: {
     configuration: {
         deployData: {
             dataRepository: """ + self.inputBase + """
-            collection: """ + RunConfiguration.collection + """
+            collection: """ + self.config.camera.collection + """
             script: "$DATAREL_DIR/bin/runOrca/deployData.sh"
         }
         announceData: {
@@ -534,7 +595,7 @@ workflow: {
     }
 """
             self.nPipelines = 0
-            for machine in RunConfiguration.machineSets[self.machineSet]:
+            for machine in DrpRunner.machineSets[self.machineSet]:
                 machineName, processes = machine.split(':')
                 self.nPipelines += int(processes)
                 print >>policyFile, """
@@ -552,12 +613,19 @@ workflow: {
 
     def generateInputList(self):
         with open("ccdlist", "w") as inputFile:
-            print >>inputFile, ">intids visit"
+            if len(self.config.camera.intids) > 0:
+                print >>inputFile, \
+                        ">intids " + " ".join(self.config.camera.intids)
             import lsst.daf.persistence as dafPersist
-            from lsst.obs.lsstSim import LsstSimMapper
+            import importlib
+            mapperModule = importlib.import_module(
+                    self.config.camera.mapperModule)
+            mapperClass = mapperModule.getattr(self.config.camera.mapperClass)
             butler = dafPersist.ButlerFactory(
-                    mapper=LsstSimMapper(root=self.inputDirectory)).create()
+                    mapper=mapperClass(root=self.inputDirectory)).create()
             numInputs = 0
+
+            # TODO make camera-configurable
             for sensorRef in butler.subset("raw", "sensor"):
                 numChannels = 0
                 for channelRef in sensorRef.subItems():
@@ -576,6 +644,7 @@ workflow: {
                             (numChannels,), "not processing"
             for i in xrange(self.nPipelines):
                 print >>inputFile, "raw visit=0 raft=0 sensor=0"
+            # END TODO
 
     def generateEnvironment(self):
         with open("env.sh", "w") as envFile:
@@ -597,7 +666,7 @@ workflow: {
 
     def _lockSet(self, machineSet):
         (tempFileDescriptor, tempFilename) = \
-                tempfile.mkstemp(dir=RunConfiguration.lockBase)
+                tempfile.mkstemp(dir=self.lockBase)
         with os.fdopen(tempFileDescriptor, "w") as tempFile:
             print >>tempFile, self.runInfo,
         os.chmod(tempFilename, 0644)
@@ -610,7 +679,7 @@ workflow: {
         return True
 
     def lockMachines(self):
-        machineSets = sorted(RunConfiguration.machineSets.keys())
+        machineSets = sorted(DrpRunner.machineSets.keys())
         for machineSet in machineSets:
             if machineSet.startswith(self.arch):
                 if self._lockSet(machineSet):
@@ -685,26 +754,26 @@ workflow: {
         os.mkdir("../SourceAssoc")
 
         self._exec("$AP_DIR/bin/sourceAssoc.py "
-                "lsstSim ../output "
+                + self.camera + " ../output "
                 "--doraise --output ../SourceAssoc",
                 "SourceAssoc_ImSim.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
-                " --camera=lsstSim"
+                " --camera=" + self.camera +
                 " --user=%s --host=%s --port=%s %s" %
-                (self.dbUser, RunConfiguration.dbHost,
-                 RunConfiguration.dbPort, self.dbName),
+                (self.dbUser, self.config.dbHost,
+                 self.config.dbPort, self.dbName),
                 "prepareDb.log")
         self._log("prepareDb complete")
 
         os.chdir("..")
-        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_ImSim.py"
+        self._exec(self.config.camera.ingestProcessed +
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --registry=output/registry.sqlite3"
                 " --strict"
                 " . output" %
-                (self.dbUser, RunConfiguration.dbHost,
-                 RunConfiguration.dbPort, self.dbName),
+                (self.dbUser, self.config.dbHost,
+                 self.config.dbPort, self.dbName),
                 "run/ingestProcessed_ImSim.log")
         os.chdir("run")
         self._log("ingestProcessed complete")
@@ -714,36 +783,38 @@ workflow: {
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --strict --jobs=1 --create-views"
                 " ../csv-SourceAssoc ../SourceAssoc" %
-                (self.dbUser, RunConfiguration.dbHost,
-                 RunConfiguration.dbPort, self.dbName),
+                (self.dbUser, self.config.dbHost,
+                 self.config.dbPort, self.dbName),
                 "ingestSourceAssoc.log")
         self._log("ingestSourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/referenceMatch.py"
+                " --camera=" + self.camera +
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --ref-catalog=../input/refObject.csv"
                 " --exposure-metadata=../Science_Ccd_Exposure_Metadata.csv"
                 " ../csv-SourceAssoc" %
-                (self.dbUser, RunConfiguration.dbHost,
-                 RunConfiguration.dbPort, self.dbName),
+                (self.dbUser, self.config.dbHost,
+                 self.config.dbPort, self.dbName),
                 "referenceMatch.log")
         self._log("referenceMatch complete")
         self._exec("$DATAREL_DIR/bin/ingest/finishDb.py"
-                " --camera=lsstSim"
+                " --camera=" + self.camera +
                 " --user=%s --host=%s --port=%s"
                 " --transpose"
                 " %s" %
-                (self.dbUser, RunConfiguration.dbHost,
-                 RunConfiguration.dbPort, self.dbName),
+                (self.dbUser, self.config.dbHost,
+                 self.config.dbPort, self.dbName),
                 "finishDb.log")
         self._log("finishDb complete")
 
     def doPipeQa(self):
-        _checkWritable(RunConfiguration.pipeQaDir)
-        os.environ['WWW_ROOT'] = RunConfiguration.pipeQaDir
+        _checkWritable(self.config.pipeQaDir)
+        os.environ['WWW_ROOT'] = self.config.pipeQaDir
         os.environ['WWW_RERUN'] = self.dbName
         self._exec("$TESTING_DISPLAYQA_DIR/bin/newQa.py " + self.dbName,
                 "newQa.log")
         self._exec("$TESTING_PIPEQA_DIR/bin/pipeQa.py"
+                " --camera " + self.camera +
                 " --delaySummary"
                 " --forkFigure"
                 " --keep"
@@ -777,11 +848,11 @@ workflow: {
 #        self._exec("$DATAREL_DIR/bin/ingest/linkDb.py"
 #                " -u %s -H %s"
 #                " -t %s"
-#                " %s" % (self.dbUser, RunConfiguration.dbHost,
+#                " %s" % (self.dbUser, self.config.dbHost,
 #                    self.options.runType, self.dbName), "linkDb.log")
-        latest = os.path.join(RunConfiguration.pipeQaDir,
+        latest = os.path.join(self.config.pipeQaDir,
                 "latest_" + self.options.runType)
-        qaDir = os.path.join(RunConfiguration.pipeQaDir, self.dbName)
+        qaDir = os.path.join(self.config.pipeQaDir, self.dbName)
         if os.path.exists(qaDir):
             if os.path.lexists(latest + ".bak"):
                 os.unlink(latest + ".bak")
@@ -790,8 +861,8 @@ workflow: {
             os.symlink(qaDir, latest)
 
     def findMachineSet(self, runId):
-        for lockFileName in os.listdir(RunConfiguration.lockBase):
-            with open(os.path.join(RunConfiguration.lockBase, lockFileName),
+        for lockFileName in os.listdir(self.lockBase):
+            with open(os.path.join(self.lockBase, lockFileName),
                     "r") as lockFile:
                 for line in lockFile:
                     if line == "Run: " + runId + "\n":
@@ -812,10 +883,10 @@ workflow: {
         print >>sys.stderr, "waiting for production shutdown"
         time.sleep(15)
         print >>sys.stderr, "killing all remote processes"
-        for machine in RunConfiguration.machineSets[self.machineSet]:
+        for machine in DrpRunner.machineSets[self.machineSet]:
             machine = re.sub(r':.*', "", machine)
             if machine.find(".") == -1:
-                machine = machine + "." + RunConfiguration.defaultDomain
+                machine = machine + "." + self.config.defaultDomain
             processes = subprocess.Popen(["ssh", machine, "/bin/ps", "-o",
                 "pid:6,command"], stdout=subprocess.PIPE)
             for line in processes.stdout:
@@ -836,12 +907,17 @@ workflow: {
         return False
 
     def checkForResults(self):
+        # TODO make camera-configurable
         calexps = glob.glob(os.path.join(self.outputDirectory,
             "output", "calexp", "v*", "R*", "S*.fits"))
         if len(calexps) < 2:
             return False
         srcs = glob.glob(os.path.join(self.outputDirectory,
             "output", "src", "v*", "R*", "S*.fits"))
+        # END TODO
+        if len(srcs) < self.options.ccdCount:
+            print >>sys.stderr, "Warning: fewer sources than CCDs:", \
+                    len(srcs), '<', self.options.ccdCount
         return len(srcs) >= 2
 
 
@@ -853,6 +929,7 @@ workflow: {
 
     def analyzeLogs(self, runId, inProgress=False):
         import MySQLdb
+        # TODO make camera-configurable
         jobStartRegex = re.compile(
                 r"Processing job:"
                 r"(\s+raft=(?P<raft>\d,\d)"
@@ -860,9 +937,10 @@ workflow: {
                 r"|\s+type=calexp"
                 r"|\s+visit=(?P<visit>\d+)){4}"
         )
+        # END TODO
 
-        host = RunConfiguration.dbHost
-        port = RunConfiguration.dbPort
+        host = self.config.dbHost
+        port = self.config.dbPort
         with MySQLdb.connect(
                 host=host,
                 port=port,
@@ -921,6 +999,7 @@ workflow: {
             result += "%d pipelines used\n" % (nPipelines,)
     
             cursor = conn.cursor()
+            # TODO make camera-configurable
             cursor.execute("""
                 SELECT CASE gid
                     WHEN 1 THEN 'pipeline shutdowns seen'
@@ -942,6 +1021,7 @@ workflow: {
                     END AS gid
                     FROM Logs
                 ) AS stats WHERE gid > 0 GROUP BY gid""")
+            # END TODO
             nShutdown = 0
             for d, n in cursor.fetchall():
                 result += "%d %s\n" % (n, d)
@@ -1014,9 +1094,11 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
             for d in cursor.fetchall():
                 match = jobStartRegex.search(d['COMMENT'])
                 if match:
+                    # TODO make camera-configurable
                     jobs[d['workerid']] = "Visit %s Raft %s Sensor %s" % (
                             match.group("visit"), match.group("raft"),
                             match.group("sensor"))
+                    # END TODO
                 elif not d['COMMENT'].startswith('Processing job:'):
                     if jobs.has_key(d['workerid']):
                         job = jobs[d['workerid']]
@@ -1075,9 +1157,9 @@ AND COMMENT NOT LIKE 'Skipping process due to error'
 ###############################################################################
 
     def parseOptions(self, args):
-        parser = OptionParser("""%prog [options]
+        parser = OptionParser("""%prog CAMERA [options]
 
-Perform an integrated production run.
+Perform an integrated production run for the given camera (lsstSim or sdss).
 
 Uses the current stack and setup package versions.""")
 
@@ -1096,7 +1178,7 @@ Uses the current stack and setup package versions.""")
         archs = set()
         self.arch = None
         machineName = self.hostname.split('.')[0]
-        for machineSet, machines in RunConfiguration.machineSets.iteritems():
+        for machineSet, machines in DrpRunner.machineSets.iteritems():
             a = re.sub(r'-.*', "", machineSet)
             archs.add(a)
             for machine in machines:
@@ -1146,24 +1228,26 @@ Uses the current stack and setup package versions.""")
                 help="test ssh connectivity to all hosts and exit")
 
         input = None
-        for entry in sorted(os.listdir(RunConfiguration.inputBase),
+        for entry in sorted(os.listdir(self.config.camera.inputBase),
                 reverse=True):
+            # TODO make camera-configurable
             if entry.startswith("obs_imSim"):
                 input = entry
                 break
+            # END TODO
 
         parser.set_defaults(
                 runType=self.user,
-                pipeline=RunConfiguration.pipelinePolicy,
+                pipeline=self.config.camera.pipelinePolicy,
                 input=input,
-                output=RunConfiguration.outputBase,
+                output=self.config.outputBase,
                 doPipeQa=True,
-                toAddress=RunConfiguration.toAddress)
+                toAddress=self.config.toAddress)
 
         return parser.parse_args(args)
 
 def main():
-    configuration = RunConfiguration(sys.argv)
+    configuration = DrpRunner(sys.argv)
     configuration.check()
     configuration.run()
 
