@@ -245,7 +245,8 @@ class RunConfiguration(object):
             print runId
 
     def check(self):
-        for requiredPackage in ['ctrl_orca', 'datarel', 'astrometry_net_data']:
+        for requiredPackage in ['ctrl_orca', 'datarel',
+                'meas_extensions_multiShapelet', 'astrometry_net_data']:
             if not self.setups.has_key(requiredPackage):
                 raise RuntimeError(requiredPackage + " is not setup")
         if self.setups['astrometry_net_data'].find('sdss') == -1:
