@@ -78,7 +78,7 @@ class RunConfiguration(object):
     runIdPattern = "%(runType)s_%(datetime)s"
     lockBase = os.path.join(outputBase, "locks")
     collection = "S12_sdss"
-    spacePerCcd = int(160e6) # calexp only
+    spacePerCcd = int(31e6) # calexp only
     version = 2
     sendmail = None
     for sm in ["/usr/sbin", "/usr/bin", "/sbin"]:
@@ -94,6 +94,11 @@ class RunConfiguration(object):
     def __init__(self, args):
         self.datetime = time.strftime("%Y_%m%d_%H%M%S")
         self.user = os.getlogin()
+        if self.user == 'buildbot':
+            RunConfiguration.pipeQaBase = re.sub(r'dev', 'buildbot',
+                    RunConfiguration.pipeQaBase)
+            RunConfiguration.pipeQaDir = re.sub(r'dev', 'buildbot',
+                    RunConfiguration.pipeQaDir)
         self.dbUser = DbAuth.username(RunConfiguration.dbHost,
                 str(RunConfiguration.dbPort))
         self.hostname = socket.getfqdn()
@@ -551,7 +556,8 @@ workflow: {
         with open("env.sh", "w") as envFile:
             # TODO -- change EUPS_PATH based on selected architecture
             for k, v in os.environ.iteritems():
-                print >>envFile, "export %s='%s'" % (k, v)
+                if re.search(r'_DIR|SETUP_|LSST|EUPS|PATH', k):
+                    print >>envFile, "export %s=%s" % (k, repr(v))
 
         configDirectory = os.path.join(self.outputDirectory, "config")
         os.mkdir(configDirectory)
@@ -645,10 +651,7 @@ workflow: {
         for env in glob.glob(os.path.join(self.outputDirectory,
             "work", "*", "eups-env.txt")):
             try:
-                # Filter out SCM for buildbot
-                subprocess.check_call(
-                        "perl -pe 's/SCM //;' %s | diff - %s" % (tags, env),
-                        shell=True)
+                subprocess.check_call(["/usr/bin/diff", tags, env])
             except subprocess.CalledProcessError:
                 print >>sys.stderr, "*** Mismatched setup", env
                 raise
