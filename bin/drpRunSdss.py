@@ -312,24 +312,29 @@ Overrides: %s
             self._log("Input list created")
             self.generateEnvironment()
             self._log("Environment created")
-            self._sendmail("[drpRun] Start on %s: run %s" %
-                    (self.machineSet, self.runId),self.runInfo)
+            self._sendmail("[drpRun] Run %s on %s" %
+                    (self.runId, self.machineSet),
+                    "Starting run\n\n" + self.runInfo)
             self._log("Orca run started")
             self.doOrcaRun()
             self._log("Orca run complete")
-            self._sendmail("[drpRun] Orca done: run %s" % (self.runId,),
-                    self.runInfo + "\n" + self.analyzeLogs(self.runId))
+            self._sendmail("[drpRun] Re: Run %s on %s" %
+                    (self.runId, self.machineSet),
+                    "Orca done\n\n" + self.runInfo +
+                    "\n" + self.analyzeLogs(self.runId))
 
             if self.checkForKill():
-                self._sendmail("[drpRun] Orca killed: run %s" % (self.runId,),
-                        self.runInfo)
+                self._sendmail("[drpRun] Re: Run %s on %s" %
+                        (self.runId, self.machineSet),
+                        "Orca killed\n\n" + self.runInfo)
                 self.unlockMachines()
                 return
             if not self.checkForResults():
                 self._log("*** Insufficient results after Orca")
-                self._sendmail("[drpRun] Insufficient results: run %s" %
-                        (self.runId,),
-                        self.runInfo + "\n" + self.analyzeLogs(self.runId))
+                self._sendmail("[drpRun] Re: Run %s on %s" %
+                        (self.runId, self.machineSet),
+                        "Insufficient results\n\n" + self.runInfo +
+                        "\n" + self.analyzeLogs(self.runId))
                 self.unlockMachines()
                 return
 
@@ -337,23 +342,31 @@ Overrides: %s
             self.doAdditionalJobs()
             self._log("SourceAssociation and ingest complete")
             if self.options.doPipeQa:
-                self._sendmail("[drpRun] pipeQA start: run %s" %
-                        (self.runId,), "pipeQA link: %s" % (self.pipeQaUrl,))
+                self._sendmail("[drpRun] Re: Run %s on %s" %
+                        (self.runId, self.machineSet),
+                        "pipeQA start\n\n" + 
+                        "pipeQA link: %s" % (self.pipeQaUrl,))
                 self.doPipeQa()
                 self._log("pipeQA complete")
             if not self.options.testOnly:
                 self.doLatestLinks()
             if self.options.doPipeQa:
-                self._sendmail("[drpRun] Complete: run %s" %
-                        (self.runId,), "pipeQA link: %s " % (self.pipeQaUrl,))
+                self._sendmail("[drpRun] Re: Run %s on %s" %
+                        (self.runId, self.machineSet),
+                        "Complete\n\n" +
+                        "pipeQA link: %s " % (self.pipeQaUrl,))
             else:
-                self._sendmail("[drpRun] Complete: run %s" %
-                        (self.runId,), self.runInfo)
+                self._sendmail("[drpRun] Re: Run %s on %s" %
+                        (self.runId, self.machineSet),
+                        "Complete\n\n" +
+                        self.runInfo)
 
         except Exception, e:
             self._log("*** Exception in run:\n" + str(e))
-            self._sendmail("[drpRun] Aborted: run %s" % (self.runId,),
-                    self.runInfo + "\n" + str(e))
+            self._sendmail("[drpRun] Re: Run %s on %s" %
+                    (self.runId, self.machineSet),
+                    "Aborted\n\n" + self.runInfo +
+                    "\n" + str(e))
             raise
 
         finally:
@@ -663,7 +676,7 @@ workflow: {
         self._exec("$AP_DIR/bin/sourceAssoc.py "
                 "sdss ../output "
                 "--doraise --output ../SourceAssoc",
-                "SourceAssoc_ImSim.log")
+                "SourceAssoc_sdss.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
                 " --camera=sdss"
@@ -681,7 +694,7 @@ workflow: {
                 " . output" %
                 (self.dbUser, RunConfiguration.dbHost,
                  RunConfiguration.dbPort, self.dbName),
-                "run/ingestProcessed_ImSim.log")
+                "run/ingestProcessed_sdss.log")
         os.chdir("run")
         self._log("ingestProcessed complete")
         
