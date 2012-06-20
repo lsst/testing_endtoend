@@ -312,28 +312,20 @@ Overrides: %s
             self._log("Input list created")
             self.generateEnvironment()
             self._log("Environment created")
-            self._sendmail("[drpRun] Run %s on %s" %
-                    (self.runId, self.machineSet),
-                    "Starting run\n\n" + self.runInfo)
+            self._sendmail("Starting run", self.runInfo)
             self._log("Orca run started")
             self.doOrcaRun()
             self._log("Orca run complete")
-            self._sendmail("[drpRun] Re: Run %s on %s" %
-                    (self.runId, self.machineSet),
-                    "Orca done\n\n" + self.runInfo +
+            self._sendmail("Orca done", self.runInfo +
                     "\n" + self.analyzeLogs(self.runId))
 
             if self.checkForKill():
-                self._sendmail("[drpRun] Re: Run %s on %s" %
-                        (self.runId, self.machineSet),
-                        "Orca killed\n\n" + self.runInfo)
+                self._sendmail("Orca killed", self.runInfo)
                 self.unlockMachines()
                 return
             if not self.checkForResults():
                 self._log("*** Insufficient results after Orca")
-                self._sendmail("[drpRun] Re: Run %s on %s" %
-                        (self.runId, self.machineSet),
-                        "Insufficient results\n\n" + self.runInfo +
+                self._sendmail("Insufficient results", self.runInfo +
                         "\n" + self.analyzeLogs(self.runId))
                 self.unlockMachines()
                 return
@@ -342,31 +334,21 @@ Overrides: %s
             self.doAdditionalJobs()
             self._log("SourceAssociation and ingest complete")
             if self.options.doPipeQa:
-                self._sendmail("[drpRun] Re: Run %s on %s" %
-                        (self.runId, self.machineSet),
-                        "pipeQA start\n\n" + 
+                self._sendmail("pipeQA start",
                         "pipeQA link: %s" % (self.pipeQaUrl,))
                 self.doPipeQa()
                 self._log("pipeQA complete")
             if not self.options.testOnly:
                 self.doLatestLinks()
             if self.options.doPipeQa:
-                self._sendmail("[drpRun] Re: Run %s on %s" %
-                        (self.runId, self.machineSet),
-                        "Complete\n\n" +
+                self._sendmail("Complete",
                         "pipeQA link: %s " % (self.pipeQaUrl,))
             else:
-                self._sendmail("[drpRun] Re: Run %s on %s" %
-                        (self.runId, self.machineSet),
-                        "Complete\n\n" +
-                        self.runInfo)
+                self._sendmail("Complete", self.runInfo)
 
         except Exception, e:
             self._log("*** Exception in run:\n" + str(e))
-            self._sendmail("[drpRun] Re: Run %s on %s" %
-                    (self.runId, self.machineSet),
-                    "Aborted\n\n" + self.runInfo +
-                    "\n" + str(e))
+            self._sendmail("Aborted", self.runInfo + "\n" + str(e))
             raise
 
         finally:
@@ -378,16 +360,18 @@ Overrides: %s
 # 
 ###############################################################################
 
-    def _sendmail(self, subject, body, toStderr=True):
+    def _sendmail(self, subject, body):
         print >>sys.stderr, subject
         msg = MIMEText(body)
-        msg['Subject'] = subject
+        msg['Subject'] = "[drpRun] Re: Run %s on %s" % (self.runId,
+                self.machineSet)
         msg['From'] = self.fromAddress
         msg['To'] = self.options.toAddress
 
         mail = subprocess.Popen([RunConfiguration.sendmail,
             "-t", "-f", self.fromAddress], stdin=subprocess.PIPE)
         try:
+            print >>mail.stdin, subject, "\n"
             print >>mail.stdin, msg
         finally:
             mail.stdin.close()
