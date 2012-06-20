@@ -365,7 +365,7 @@ Overrides: %s
 
     def _sendmail(self, subject, body):
         print >>sys.stderr, subject
-        msg = MIMEText(body)
+        msg = MIMEText(subject + "\n\n" + body)
         msg['Subject'] = "[drpRun] Re: Run %s on %s" % (self.runId,
                 self.machineSet)
         msg['From'] = self.fromAddress
@@ -374,7 +374,6 @@ Overrides: %s
         mail = subprocess.Popen([RunConfiguration.sendmail,
             "-t", "-f", self.fromAddress], stdin=subprocess.PIPE)
         try:
-            print >>mail.stdin, subject, "\n"
             print >>mail.stdin, msg
         finally:
             mail.stdin.close()
