@@ -146,7 +146,11 @@ class RunConfiguration(object):
                 coll=self.collectionName,
                 runType=self.options.runType,
                 datetime=self.datetime)
-        self.runId = RunConfiguration.runIdPattern % runIdProperties
+        # When resuming a run, use provided runID
+        if self.options.resumeRunId is None:
+            self.runId = RunConfiguration.runIdPattern % runIdProperties
+        else:
+            self.runId = self.options.resumeRunId
         runIdProperties['runid'] = self.runId
         dbNamePattern = "%(dbUser)s_%(coll)s_u_%(runid)s"
         self.dbName = dbNamePattern % runIdProperties
@@ -157,10 +161,16 @@ class RunConfiguration(object):
                 RunConfiguration.collection)
         self.outputDirectory = os.path.join(self.options.output, self.runId)
         self.outputDirectory = os.path.abspath(self.outputDirectory)
-        if os.path.exists(self.outputDirectory):
-            raise RuntimeError("Output directory %s already exists" %
+
+        if self.options.resumeRunId is None :
+            if os.path.exists(self.outputDirectory):
+                raise RuntimeError("Output directory %s already exists" %
                     (self.outputDirectory,))
-        os.mkdir(self.outputDirectory)
+            os.mkdir(self.outputDirectory)
+        elif not os.path.exists(self.outputDirectory):
+            raise RuntimeError("Output directory %s does not exist for resumed run" %
+                (self.outputDirectory,))
+
         self.pipeQaUrl = RunConfiguration.pipeQaBase + self.dbName + "/"
 
         self.eupsPath = os.environ['EUPS_PATH']
@@ -274,6 +284,7 @@ class RunConfiguration(object):
 
         _checkWritable(self.outputDirectory)
         result = os.statvfs(self.outputDirectory)
+        #RAA#  When resuming: Determine how much additional space 2 be consumed
         availableSpace = result.f_bavail * result.f_bsize
         minimumSpace = int(RunConfiguration.spacePerCcd * self.options.ccdCount)
         if availableSpace < minimumSpace:
@@ -302,27 +313,31 @@ Overrides: %s
 
         self.lockMachines()
         try:
-            os.chdir(self.outputDirectory)
-            os.mkdir("run")
-            os.chdir("run")
-            self._log("Run directory created")
-            self.generatePolicy()
-            self._log("Policy created")
-            self.generateInputList()
-            self._log("Input list created")
-            self.generateEnvironment()
-            self._log("Environment created")
-            self._sendmail("Starting run", self.runInfo)
-            self._log("Orca run started")
-            self.doOrcaRun()
-            self._log("Orca run complete")
-            self._sendmail("Orca done", self.runInfo +
-                    "\n" + self.analyzeLogs(self.runId))
-
-            if self.checkForKill():
-                self._sendmail("Orca killed", self.runInfo)
-                self.unlockMachines()
-                return
+            if self.options.resumeRunId is None:
+                os.chdir(self.outputDirectory)
+                os.mkdir("run")
+                os.chdir("run")
+                self._log("Run directory created")
+                self.generatePolicy()
+                self._log("Policy created")
+                self.generateInputList()
+                self._log("Input list created")
+                self.generateEnvironment()
+                self._log("Environment created")
+                self._sendmail("Starting run", self.runInfo)
+                self._log("Orca run started")
+                self.doOrcaRun()
+                self._log("Orca run complete")
+                self._sendmail("Orca done", self.runInfo +
+                        "\n" + self.analyzeLogs(self.runId))
+    
+                if self.checkForKill():
+                    self._sendmail("Orca killed", self.runInfo)
+                    self.unlockMachines()
+                    return
+            else:
+                os.chdir(self.outputDirectory)
+                os.chdir("run")
             if not self.checkForResults():
                 self._log("*** Insufficient results after Orca")
                 self._sendmail("Insufficient results", self.runInfo +
@@ -330,7 +345,20 @@ Overrides: %s
                 self.unlockMachines()
                 return
 
-            self.setupCheck()
+            # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+            # RAA Temporarily removed; testing w/modified testing_endtoend
+            #     so test wouldn't pass; also a problem if updated
+            #     SrcAssoc/pipeQA wanted.  Design Issue to resolve.
+            #
+            # self.setupCheck()
+            # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+
+            # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+            # RAA For resume testing: create state where only processCCD done.
+            #     Data to be used in later resumption tests
+#            raise RuntimeError("Intentionally stopping job after processCCD")
+            # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+
             self.doAdditionalJobs()
             self._log("SourceAssociation and ingest complete")
             if self.options.doPipeQa:
@@ -1108,6 +1136,9 @@ Uses the current stack and setup package versions.""")
                 help="do NOT link run results as the latest of its type")
         parser.add_option("-l", "--linkLatest", metavar="RUNID",
                 help="link previous run result as the latest of its type and exit")
+        parser.add_option("--skipProcessCcd", dest="resumeRunId",
+                metavar="RUNID",
+                help="resume previous run after ProcessCcd")
         parser.add_option("--skipPipeQa", dest="doPipeQa",
                 action="store_false",
                 help="skip running pipeQA")
