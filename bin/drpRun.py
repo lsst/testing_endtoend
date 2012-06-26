@@ -672,7 +672,7 @@ workflow: {
                 "lsstSim ../output "
                 "-c measSlots.modelFlux=multishapelet.combo.flux "
                 "--doraise --output ../SourceAssoc",
-                "SourceAssoc_ImSim.log")
+                "SourceAssoc.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
                 " --camera=lsstSim"
@@ -697,6 +697,7 @@ workflow: {
         
         os.mkdir("../csv-SourceAssoc")
         self._exec("$DATAREL_DIR/bin/ingest/ingestSourceAssoc.py"
+                " --camera=lsstSim"
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --strict --jobs=1 --create-views"
                 " ../csv-SourceAssoc ../SourceAssoc" %

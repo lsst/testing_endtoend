@@ -660,7 +660,7 @@ workflow: {
                 "sdss ../output "
                 "-c measSlots.modelFlux=multishapelet.combo.flux "
                 "--doraise --output ../SourceAssoc",
-                "SourceAssoc_sdss.log")
+                "SourceAssoc.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
                 " --camera=sdss"
@@ -685,6 +685,7 @@ workflow: {
         
         os.mkdir("../csv-SourceAssoc")
         self._exec("$DATAREL_DIR/bin/ingest/ingestSourceAssoc.py"
+                " --camera=sdss"
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --strict --jobs=1 --create-views"
                 " ../csv-SourceAssoc ../SourceAssoc" %
