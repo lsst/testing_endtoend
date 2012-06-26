@@ -337,7 +337,20 @@ Overrides: %s
                     return
             else:
                 os.chdir(self.outputDirectory)
+                #RAA  TBD??  halt if residue found  or remove residue
+                # if  os.path.exists("./SourceAssoc"):
+                #     shutil.rmtree("./SourceAssoc")
                 os.chdir("run")
+                # if os.path.exists("./SourceAssoc.log"):
+                #     os.remove("./SourceAssoc_sdss.log")
+                # Check DB for emptiness? Check if prepareDB fails on content.
+                # 
+                with open("env_resumed.sh", "w") as envFile:
+                    # TODO -- change EUPS_PATH based on selected architecture
+                    for k, v in os.environ.iteritems():
+                        if re.search(r'_DIR|SETUP_|LSST|EUPS|PATH', k):
+                            print >>envFile, "export %s=%s" % (k, repr(v))
+
             if not self.checkForResults():
                 self._log("*** Insufficient results after Orca")
                 self._sendmail("Insufficient results", self.runInfo +
@@ -345,19 +358,8 @@ Overrides: %s
                 self.unlockMachines()
                 return
 
-            # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
-            # RAA Temporarily removed; testing w/modified testing_endtoend
-            #     so test wouldn't pass; also a problem if updated
-            #     SrcAssoc/pipeQA wanted.  Design Issue to resolve.
-            #
-            # self.setupCheck()
-            # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
-
-            # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
-            # RAA For resume testing: create state where only processCCD done.
-            #     Data to be used in later resumption tests
-#            raise RuntimeError("Intentionally stopping job after processCCD")
-            # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+            if self.options.resumeRunId is None:
+                self.setupCheck()
 
             self.doAdditionalJobs()
             self._log("SourceAssociation and ingest complete")
@@ -686,6 +688,7 @@ workflow: {
 
         self._exec("$AP_DIR/bin/sourceAssoc.py "
                 "sdss ../output "
+                "-c measSlots.modelFlux=multishapelet.combo.flux "
                 "--doraise --output ../SourceAssoc",
                 "SourceAssoc_sdss.log")
         self._log("SourceAssoc complete")
