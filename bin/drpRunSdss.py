@@ -284,7 +284,9 @@ class RunConfiguration(object):
 
         _checkWritable(self.outputDirectory)
         result = os.statvfs(self.outputDirectory)
-        #RAA#  When resuming: Determine how much additional space 2 be consumed
+        #  On a resumption, majority of disk space has already been consumed
+        if self.options.resumeRunId is not None:
+            return
         availableSpace = result.f_bavail * result.f_bsize
         minimumSpace = int(RunConfiguration.spacePerCcd * self.options.ccdCount)
         if availableSpace < minimumSpace:
@@ -344,7 +346,7 @@ Overrides: %s
                 # if os.path.exists("./SourceAssoc.log"):
                 #     os.remove("./SourceAssoc_sdss.log")
                 # Check DB for emptiness? Check if prepareDB fails on content.
-                # 
+                  
                 with open("env_resumed.sh", "w") as envFile:
                     # TODO -- change EUPS_PATH based on selected architecture
                     for k, v in os.environ.iteritems():
