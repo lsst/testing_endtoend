@@ -658,7 +658,6 @@ workflow: {
 
         self._exec("$AP_DIR/bin/sourceAssoc.py "
                 "sdss ../output "
-                "-c measSlots.modelFlux=multishapelet.combo.flux "
                 "--doraise --output ../SourceAssoc",
                 "SourceAssoc.log")
         self._log("SourceAssoc complete")
