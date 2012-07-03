@@ -338,15 +338,10 @@ Overrides: %s
                     self.unlockMachines()
                     return
             else:
-                os.chdir(self.outputDirectory)
-                #RAA  TBD??  halt if residue found  or remove residue
-                # if  os.path.exists("./SourceAssoc"):
-                #     shutil.rmtree("./SourceAssoc")
-                os.chdir("run")
-                # if os.path.exists("./SourceAssoc.log"):
-                #     os.remove("./SourceAssoc_sdss.log")
-                # Check DB for emptiness? Check if prepareDB fails on content.
-                  
+                os.chdir(os.path.join(self.outputDirectory, "run"))
+                # Exit if residue from previous SrcAssoc found  
+                if  os.path.exists("../SourceAssoc") or os.path.exists("SourceAssoc.log"):
+                    raise RuntimeError("Output from previous SourceAssoc process exists.")
                 with open("env_resumed.sh", "w") as envFile:
                     # TODO -- change EUPS_PATH based on selected architecture
                     for k, v in os.environ.iteritems():
