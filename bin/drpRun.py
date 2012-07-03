@@ -339,6 +339,7 @@ Overrides: %s
                     self.unlockMachines()
                     return
             else:
+                self._sendmail("Resuming run", self.runInfo)
                 os.chdir(os.path.join(self.outputDirectory, "run"))
                 # Exit if residue from previous SrcAssoc found  
                 if  os.path.exists("../SourceAssoc") or os.path.exists("SourceAssoc.log"):
