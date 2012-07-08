@@ -146,7 +146,11 @@ class RunConfiguration(object):
                 coll=self.collectionName,
                 runType=self.options.runType,
                 datetime=self.datetime)
-        self.runId = RunConfiguration.runIdPattern % runIdProperties
+        # When resuming a run, use provided runID
+        if self.options.resumeRunId is None:
+            self.runId = RunConfiguration.runIdPattern % runIdProperties
+        else:
+            self.runId = self.options.resumeRunId
         runIdProperties['runid'] = self.runId
         dbNamePattern = "%(dbUser)s_%(coll)s_u_%(runid)s"
         self.dbName = dbNamePattern % runIdProperties
@@ -157,10 +161,16 @@ class RunConfiguration(object):
                 RunConfiguration.collection)
         self.outputDirectory = os.path.join(self.options.output, self.runId)
         self.outputDirectory = os.path.abspath(self.outputDirectory)
-        if os.path.exists(self.outputDirectory):
-            raise RuntimeError("Output directory %s already exists" %
+
+        if self.options.resumeRunId is None :
+            if os.path.exists(self.outputDirectory):
+                raise RuntimeError("Output directory %s already exists" %
                     (self.outputDirectory,))
-        os.mkdir(self.outputDirectory)
+            os.mkdir(self.outputDirectory)
+        elif not os.path.exists(self.outputDirectory):
+            raise RuntimeError("Output directory %s does not exist for resumed run" %
+                (self.outputDirectory,))
+
         self.pipeQaUrl = RunConfiguration.pipeQaBase + self.dbName + "/"
 
         self.eupsPath = os.environ['EUPS_PATH']
@@ -274,6 +284,9 @@ class RunConfiguration(object):
 
         _checkWritable(self.outputDirectory)
         result = os.statvfs(self.outputDirectory)
+        #  On a resumption, majority of disk space has already been consumed
+        if self.options.resumeRunId is not None:
+            return
         availableSpace = result.f_bavail * result.f_bsize
         minimumSpace = int(RunConfiguration.spacePerCcd * self.options.ccdCount)
         if availableSpace < minimumSpace:
@@ -302,27 +315,36 @@ Overrides: %s
 
         self.lockMachines()
         try:
-            os.chdir(self.outputDirectory)
-            os.mkdir("run")
-            os.chdir("run")
-            self._log("Run directory created")
-            self.generatePolicy()
-            self._log("Policy created")
-            self.generateInputList()
-            self._log("Input list created")
-            self.generateEnvironment()
-            self._log("Environment created")
-            self._sendmail("Starting run", self.runInfo)
-            self._log("Orca run started")
-            self.doOrcaRun()
-            self._log("Orca run complete")
-            self._sendmail("Orca done", self.runInfo +
-                    "\n" + self.analyzeLogs(self.runId))
+            if self.options.resumeRunId is None:
+                os.chdir(self.outputDirectory)
+                os.mkdir("run")
+                os.chdir("run")
+                self._log("Run directory created")
+                self.generatePolicy()
+                self._log("Policy created")
+                self.generateInputList()
+                self._log("Input list created")
+                self.generateEnvironment()
+                self._log("Environment created")
+                self._sendmail("Starting run", self.runInfo)
+                self._log("Orca run started")
+                self.doOrcaRun()
+                self._log("Orca run complete")
+                self._sendmail("Orca done", self.runInfo +
+                        "\n" + self.analyzeLogs(self.runId))
+    
+                if self.checkForKill():
+                    self._sendmail("Orca killed", self.runInfo)
+                    self.unlockMachines()
+                    return
+            else:
+                self._sendmail("Resuming run", self.runInfo)
+                os.chdir(os.path.join(self.outputDirectory, "run"))
+                if  os.path.exists("../SourceAssoc") or \
+                    os.path.exists("SourceAssoc.log"):
+                    raise RuntimeError("Output from previous SourceAssoc process exists.")
+                self.generateEnvironment(True)
 
-            if self.checkForKill():
-                self._sendmail("Orca killed", self.runInfo)
-                self.unlockMachines()
-                return
             if not self.checkForResults():
                 self._log("*** Insufficient results after Orca")
                 self._sendmail("Insufficient results", self.runInfo +
@@ -330,7 +352,9 @@ Overrides: %s
                 self.unlockMachines()
                 return
 
-            self.setupCheck()
+            if self.options.resumeRunId is None:
+                self.setupCheck()
+
             self.doAdditionalJobs()
             self._log("SourceAssociation and ingest complete")
             if self.options.doPipeQa:
@@ -549,13 +573,14 @@ workflow: {
             for i in xrange(self.nPipelines):
                 print >>inputFile, "raw run=0 filter=0 camcol=0 field=0"
 
-    def generateEnvironment(self):
+    def generateEnvironment(self,resume=False):
         with open("env.sh", "w") as envFile:
             # TODO -- change EUPS_PATH based on selected architecture
             for k, v in os.environ.iteritems():
                 if re.search(r'_DIR|SETUP_|LSST|EUPS|PATH', k):
                     print >>envFile, "export %s=%s" % (k, repr(v))
-
+        if resume: 
+            return 
         configDirectory = os.path.join(self.outputDirectory, "config")
         os.mkdir(configDirectory)
         subprocess.check_call("eups list --setup > %s/weekly.tags" %
@@ -658,6 +683,7 @@ workflow: {
 
         self._exec("$AP_DIR/bin/sourceAssoc.py "
                 "sdss ../output "
+                "-c measSlots.modelFlux=multishapelet.combo.flux "
                 "--doraise --output ../SourceAssoc",
                 "SourceAssoc_sdss.log")
         self._log("SourceAssoc complete")
@@ -1108,6 +1134,9 @@ Uses the current stack and setup package versions.""")
                 help="do NOT link run results as the latest of its type")
         parser.add_option("-l", "--linkLatest", metavar="RUNID",
                 help="link previous run result as the latest of its type and exit")
+        parser.add_option("--skipProcessCcd", dest="resumeRunId",
+                metavar="RUNID",
+                help="resume previous run after ProcessCcd")
         parser.add_option("--skipPipeQa", dest="doPipeQa",
                 action="store_false",
                 help="skip running pipeQA")
