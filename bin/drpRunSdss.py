@@ -25,6 +25,7 @@ from email.mime.text import MIMEText
 import glob
 from optparse import OptionParser
 import os
+import pwd
 import re
 import shutil
 import socket
@@ -93,7 +94,7 @@ class RunConfiguration(object):
 
     def __init__(self, args):
         self.datetime = time.strftime("%Y_%m%d_%H%M%S")
-        self.user = os.getlogin()
+        self.user = pwd.getpwuid(os.getuid())[0]
         if self.user == 'buildbot':
             RunConfiguration.pipeQaBase = re.sub(r'dev', 'buildbot',
                     RunConfiguration.pipeQaBase)
