@@ -340,14 +340,10 @@ Overrides: %s
             else:
                 self._sendmail("Resuming run", self.runInfo)
                 os.chdir(os.path.join(self.outputDirectory, "run"))
-                # Exit if residue from previous SrcAssoc found  
-                if  os.path.exists("../SourceAssoc") or os.path.exists("SourceAssoc.log"):
+                if  os.path.exists("../SourceAssoc") or \
+                    os.path.exists("SourceAssoc.log"):
                     raise RuntimeError("Output from previous SourceAssoc process exists.")
-                with open("env_resumed.sh", "w") as envFile:
-                    # TODO -- change EUPS_PATH based on selected architecture
-                    for k, v in os.environ.iteritems():
-                        if re.search(r'_DIR|SETUP_|LSST|EUPS|PATH', k):
-                            print >>envFile, "export %s=%s" % (k, repr(v))
+                self.generateEnvironment(True)
 
             if not self.checkForResults():
                 self._log("*** Insufficient results after Orca")
@@ -577,13 +573,14 @@ workflow: {
             for i in xrange(self.nPipelines):
                 print >>inputFile, "raw run=0 filter=0 camcol=0 field=0"
 
-    def generateEnvironment(self):
+    def generateEnvironment(self,resume=False):
         with open("env.sh", "w") as envFile:
             # TODO -- change EUPS_PATH based on selected architecture
             for k, v in os.environ.iteritems():
                 if re.search(r'_DIR|SETUP_|LSST|EUPS|PATH', k):
                     print >>envFile, "export %s=%s" % (k, repr(v))
-
+        if resume: 
+            return 
         configDirectory = os.path.join(self.outputDirectory, "config")
         os.mkdir(configDirectory)
         subprocess.check_call("eups list --setup > %s/weekly.tags" %
