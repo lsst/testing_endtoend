@@ -671,8 +671,9 @@ workflow: {
 
         self._exec("$AP_DIR/bin/sourceAssoc.py "
                 "lsstSim ../output "
+                "-c measSlots.modelFlux=multishapelet.combo.flux "
                 "--doraise --output ../SourceAssoc",
-                "SourceAssoc_ImSim.log")
+                "SourceAssoc.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
                 " --camera=lsstSim"
@@ -683,19 +684,21 @@ workflow: {
         self._log("prepareDb complete")
 
         os.chdir("..")
-        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_ImSim.py"
+        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed.py"
+                " --camera=lsstSim"
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --registry=output/registry.sqlite3"
                 " --strict"
                 " . output" %
                 (self.dbUser, RunConfiguration.dbHost,
                  RunConfiguration.dbPort, self.dbName),
-                "run/ingestProcessed_ImSim.log")
+                "run/ingestProcessed.log")
         os.chdir("run")
         self._log("ingestProcessed complete")
         
         os.mkdir("../csv-SourceAssoc")
         self._exec("$DATAREL_DIR/bin/ingest/ingestSourceAssoc.py"
+                " --camera=lsstSim"
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --strict --jobs=1 --create-views"
                 " ../csv-SourceAssoc ../SourceAssoc" %

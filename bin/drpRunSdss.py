@@ -660,7 +660,7 @@ workflow: {
         self._exec("$AP_DIR/bin/sourceAssoc.py "
                 "sdss ../output "
                 "--doraise --output ../SourceAssoc",
-                "SourceAssoc_sdss.log")
+                "SourceAssoc.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
                 " --camera=sdss"
@@ -671,19 +671,21 @@ workflow: {
         self._log("prepareDb complete")
 
         os.chdir("..")
-        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed_sdss.py"
+        self._exec("$DATAREL_DIR/bin/ingest/ingestProcessed.py"
+                " --camera=sdss"
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --registry=output/registry.sqlite3"
                 " --strict"
                 " . output" %
                 (self.dbUser, RunConfiguration.dbHost,
                  RunConfiguration.dbPort, self.dbName),
-                "run/ingestProcessed_sdss.log")
+                "run/ingestProcessed.log")
         os.chdir("run")
         self._log("ingestProcessed complete")
         
         os.mkdir("../csv-SourceAssoc")
         self._exec("$DATAREL_DIR/bin/ingest/ingestSourceAssoc.py"
+                " --camera=sdss"
                 " --user=%s --host=%s --port=%s --database=%s"
                 " --strict --jobs=1 --create-views"
                 " ../csv-SourceAssoc ../SourceAssoc" %
