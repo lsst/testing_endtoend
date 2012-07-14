@@ -697,7 +697,7 @@ workflow: {
                 " lsstSim ../output"
                 " --doraise --output ../SourceAssoc"
                 " -c measSlots.modelFlux=multishapelet.combo.flux",
-                "SourceAssoc_ImSim.log")
+                "SourceAssoc.log")
         self._log("SourceAssoc complete")
         self._exec("$DATAREL_DIR/bin/ingest/prepareDb.py"
                 " --camera=lsstSim"
