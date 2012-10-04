@@ -67,17 +67,8 @@ class RunConfiguration(object):
     eventBrokerHost = "lsst8.ncsa.illinois.edu"
     defaultDomain = "ncsa.illinois.edu"
 
-    # One extra process will be used on the first node for the JobOffice
-    # Format = architecture-set number: ['machine name:number of processes']
-    machineSets = {
-            'rh6-1': ['lsst5:4', 'lsst6:2'],
-            'rh6-2': ['lsst6:2', 'lsst9:4'],
-            'rh6-3': ['lsst11:2', 'lsst14:2', 'lsst15:2']
-    }
-
     # These should generally be left unchanged
     runIdPattern = "%(runType)s_%(datetime)s"
-    lockBase = os.path.join(outputBase, "locks")
     collection = "S12_lsstsim"
     spacePerCcd = int(160e6) # calexp primarily
     version = 2
@@ -126,9 +117,6 @@ class RunConfiguration(object):
             sys.exit(0)
         if self.options.kill is not None:
             self.kill(self.options.kill)
-            sys.exit(0)
-        if self.options.hosts is not None:
-            self.hosts()
             sys.exit(0)
 
         if self.arch is None:
@@ -184,25 +172,10 @@ class RunConfiguration(object):
         # TODO -- load policy and apply overrides
         self.options.override = None
 
-    def hosts(self):
-        machines = set()
-        for machineSet in RunConfiguration.machineSets.itervalues():
-            for machine in machineSet:
-                machine = re.sub(r':.*', "", machine)
-                machines.update([machine])
-        for machine in machines:
-            if machine.find(".") == -1:
-                machine = machine + "." + RunConfiguration.defaultDomain
-            subprocess.check_call(["ssh", machine, "/bin/true"])
-
     def printStatus(self):
-        machineSets = RunConfiguration.machineSets.keys()
-        machineSets.sort()
-        for k in machineSets:
-            lockFile = self._lockName(k)
-            if os.path.exists(lockFile):
-                print "*** Machine set", k, str(RunConfiguration.machineSets[k])
-                self.report(lockFile)
+        # TODO iterate through running jobs
+        for logFile in foo:
+            self.report(logFile)
 
     def report(self, logFile):
         with open(logFile, "r") as f:
@@ -255,7 +228,7 @@ class RunConfiguration(object):
             print runId
 
     def check(self):
-        for requiredPackage in ['ctrl_orca', 'datarel',
+        for requiredPackage in ['ctrl_execute', 'ctrl_orca', 'datarel',
                 'meas_extensions_multiShapelet', 'astrometry_net_data']:
             if not self.setups.has_key(requiredPackage):
                 raise RuntimeError(requiredPackage + " is not setup")
@@ -316,15 +289,12 @@ Overrides: %s
         self.options.input, self.options.ccdCount, self.outputDirectory,
         self.dbName, str(self.options.override))
 
-        self.lockMachines()
         try:
             if self.options.resumeRunId is None:
                 os.chdir(self.outputDirectory)
                 os.mkdir("run")
                 os.chdir("run")
                 self._log("Run directory created")
-                self.generatePolicy()
-                self._log("Policy created")
                 self.generateInputList()
                 self._log("Input list created")
                 self.generateEnvironment()
@@ -337,7 +307,6 @@ Overrides: %s
                         "\n" + self.analyzeLogs(self.runId))
                 if self.checkForKill():
                     self._sendmail("Orca killed", self.runInfo)
-                    self.unlockMachines()
                     return
             else:
                 self._sendmail("Resuming run", self.runInfo)
@@ -352,7 +321,6 @@ Overrides: %s
                 self._log("*** Insufficient results after Orca")
                 self._sendmail("Insufficient results", self.runInfo +
                         "\n" + self.analyzeLogs(self.runId))
-                self.unlockMachines()
                 return
 
             if self.options.resumeRunId is None:
@@ -378,9 +346,6 @@ Overrides: %s
             self._sendmail("Aborted", self.runInfo + "\n" + str(e))
             raise
 
-        finally:
-            self.unlockMachines()
-
 ###############################################################################
 # 
 # General utilities
@@ -402,12 +367,9 @@ Overrides: %s
         finally:
             mail.stdin.close()
 
-    def _lockName(self, machineSet):
-        return os.path.join(RunConfiguration.lockBase, machineSet)
-
     def _log(self, message):
-        with open(self._lockName(self.machineSet), "a") as lockFile:
-            print >>lockFile, time.asctime(), message
+        with open(self._logFileName, "a") as logFile:
+            print >>logFile, time.asctime(), message
         print >>sys.stderr, time.asctime(), message
 
 ###############################################################################
@@ -415,148 +377,6 @@ Overrides: %s
 # Generate input files
 # 
 ###############################################################################
-
-    def generatePolicy(self):
-        with open("joboffice.paf", "w") as policyFile:
-            print >>policyFile, """#<?cfg paf policy ?>
-execute: {
-  shutdownTopic: "workflowShutdown"
-  eventBrokerHost: """ + RunConfiguration.eventBrokerHost + """
-}
-framework: {
-  exec: "$DATAREL_DIR/pipeline/PT1Pipe/joboffice-ImSim.sh"
-  type: "standard"
-  environment: unused
-}
-"""
-
-        with open("platform.paf", "w") as policyFile:
-            print >>policyFile, """#<?cfg paf policy ?>
-dir: {
-    defaultRoot: """ + self.options.output + """
-    runDirPattern:  "%(runid)s"
-    work:     work
-    input:    input
-    output:   output
-    update:   update
-    scratch:  scr
-}
-
-hw: {
-    nodeCount:  4
-    minCoresPerNode:  2
-    maxCoresPerNode:  8
-    minRamPerNode:  2.0
-    maxRamPerNode: 16.0
-}
-
-deploy:  {
-    defaultDomain:  """ + RunConfiguration.defaultDomain + """
-"""
-            first = True
-            for machine in RunConfiguration.machineSets[self.machineSet]:
-                if first:
-                    processes = int(re.sub(r'.*:', "", machine)) + 1
-                    jobOfficeMachine = re.sub(r':.*', "", machine)
-                    print >>policyFile, "            nodes: ", \
-                            jobOfficeMachine + ":" + str(processes)
-                    first = False
-                else:
-                    print >>policyFile, "            nodes: ", machine
-            print >>policyFile, "}"
-
-        subprocess.check_call(
-                "cp $DATAREL_DIR/pipeline/%s ." % (self.options.pipeline,),
-                shell=True)
-
-        if self.options.pipeline.find("/") != -1:
-            components = self.options.pipeline.split("/")
-            dir = os.path.join(*components[0:-1])
-            policy = components[-1]
-            subprocess.check_call(
-                    "ln -s $DATAREL_DIR/pipeline/%s ." % (dir,),
-                    shell=True)
-        else:
-            policy = self.options.pipeline
-
-        with open("orca.paf", "w") as policyFile:
-            print >>policyFile, """#<?cfg paf policy ?>
-shortName:           DataRelease
-eventBrokerHost:     """ + RunConfiguration.eventBrokerHost + """
-repositoryDirectory: .
-productionShutdownTopic:       productionShutdown
-
-database: {
-    name: dc3bGlobal
-    system: {   
-        authInfo: {
-            host: """ + RunConfiguration.dbHost + """
-            port: """ + str(RunConfiguration.dbPort) + """
-        }
-        runCleanup: {
-            daysFirstNotice: 7  # days when first notice is sent before run can be deleted
-            daysFinalNotice: 1  # days when final notice is sent before run can be deleted
-        }
-    }
-
-    configurationClass: lsst.ctrl.orca.db.DC3Configurator
-    configuration: {  
-        globalDbName: GlobalDB
-        dcVersion: """ + self.collectionName + """
-        dcDbName: DC3b_DB
-        minPercDiskSpaceReq: 10   # measured in percentages
-        userRunLife: 2            # measured in weeks
-    }
-    logger: {
-        launch: true
-    }
-}
-
-workflow: {
-    shortName: Workflow
-    platform: @platform.paf
-    shutdownTopic:       workflowShutdown
-
-    configurationClass: lsst.ctrl.orca.GenericPipelineWorkflowConfigurator
-    configuration: {
-        deployData: {
-            dataRepository: """ + self.inputBase + """
-            collection: """ + RunConfiguration.collection + """
-            script: "$DATAREL_DIR/bin/runOrca/deployData.sh"
-        }
-        announceData: {
-            script: $CTRL_SCHED_DIR/bin/announceDataset.py
-            topic: RawCcdAvailable
-            inputdata: ./ccdlist
-        }
-    }
-
-    pipeline: {
-        shortName:     joboffices
-        definition:    @joboffice.paf
-        runCount: 1
-        deploy: {
-            processesOnNode: """ + jobOfficeMachine + """:1
-        }
-        launch: true
-    }
-"""
-            self.nPipelines = 0
-            for machine in RunConfiguration.machineSets[self.machineSet]:
-                machineName, processes = machine.split(':')
-                self.nPipelines += int(processes)
-                print >>policyFile, """
-    pipeline: {
-        shortName:     """ + machineName + """
-        definition:    @""" + policy + """
-        runCount: """ + processes + """
-        deploy: {
-            processesOnNode: """ + machineName + ":" + processes + """
-        }
-        launch: true
-    }
-"""
-            print >>policyFile, "}"
 
     def generateInputList(self):
         with open("ccdlist", "w") as inputFile:
@@ -604,48 +424,6 @@ workflow: {
 # 
 ###############################################################################
 
-    def _lockSet(self, machineSet):
-        (tempFileDescriptor, tempFilename) = \
-                tempfile.mkstemp(dir=RunConfiguration.lockBase)
-        with os.fdopen(tempFileDescriptor, "w") as tempFile:
-            print >>tempFile, self.runInfo,
-        os.chmod(tempFilename, 0644)
-        try:
-            os.link(tempFilename, self._lockName(machineSet))
-        except:
-            os.unlink(tempFilename)
-            return False
-        os.unlink(tempFilename)
-        return True
-
-    def lockMachines(self):
-        machineSets = sorted(RunConfiguration.machineSets.keys())
-        for machineSet in machineSets:
-            if machineSet.startswith(self.arch):
-                if self._lockSet(machineSet):
-                    self.machineSet = machineSet
-                    return
-        raise RuntimeError("Unable to acquire a machine set for arch %s" %
-                (self.arch,))
-
-    def unlockMachines(self):
-        lockName = self._lockName(self.machineSet)
-        if not os.access(lockName, os.R_OK):
-            # Lock file no longer there...
-            return
-        with open(lockName, "r") as lockFile:
-            for line in lockFile:
-                if line.startswith("Output: "):
-                    outputDirectory = re.sub(r'^Output:\s+', "", line.rstrip())
-                    break
-        if hasattr(self, "outputDirectory") and \
-                self.outputDirectory is not None and \
-                self.outputDirectory != outputDirectory:
-            print >>sys.stderr, "Output directory discrepancy:", \
-                    self.outputDirectory, outputDirectory
-        # os.rename has problems spanning filesystems, so use shutil.move
-        shutil.move(lockName, os.path.join(outputDirectory, "run", "run.log"))
-
     def _exec(self, command, logFile):
         try:
             subprocess.check_call(command + " >& " + logFile, shell=True)
@@ -662,10 +440,14 @@ workflow: {
 
     def doOrcaRun(self):
         try:
-            subprocess.check_call("$CTRL_ORCA_DIR/bin/orca.py"
-                    " -e env.sh"
-                    " -r ."
-                    " -V 30 -L 2 orca.paf " + self.runId + 
+            subprocess.check_call("$CTRL_EXECUTE_DIR/bin/runOrca.py"
+                    " --platform=lsst"
+                    " --run-id=" + self.runId +
+                    " --ids-per-job=4"
+                    " --data-directory=" + self.inputBase +
+                    " --id-file=./ccdlist"
+                    " --eups-path=" + repr(os.environ["EUPS_PATH"]) +
+                    " --command 'processCcd.py lsstSim ...'" + 
                     " >& unifiedPipeline.log",
                     shell=True, stdin=open("/dev/null", "r"))
             # TODO -- monitor orca run, looking for output changes/stalls
@@ -801,23 +583,11 @@ workflow: {
                 os.rename(latest, latest + ".bak")
             os.symlink(qaDir, latest)
 
-    def findMachineSet(self, runId):
-        for lockFileName in os.listdir(RunConfiguration.lockBase):
-            with open(os.path.join(RunConfiguration.lockBase, lockFileName),
-                    "r") as lockFile:
-                for line in lockFile:
-                    if line == "Run: " + runId + "\n":
-                        return os.path.basename(lockFileName)
-        return None
-
     def kill(self, runId):
         e = eups.Eups()
         if not e.isSetup("ctrl_orca"):
             print >>sys.stderr, "ctrl_orca not setup, using default version"
             e.setup("ctrl_orca")
-        self.machineSet = self.findMachineSet(runId)
-        if self.machineSet is None:
-            raise RuntimeError("No current run with runId " + runId)
         self._log("*** orca killed")
         subprocess.check_call("$CTRL_ORCA_DIR/bin/shutprod.py 1 " + runId,
                 shell=True)
@@ -837,12 +607,10 @@ workflow: {
                     subprocess.call(["ssh", machine, "/bin/kill", pid])
             processes.wait()
         time.sleep(5)
-        print >>sys.stderr, "unlocking machine set"
-        self.unlockMachines()
 
     def checkForKill(self):
-        with open(self._lockName(self.machineSet), "r") as lockFile:
-            for line in lockFile:
+        with open(self._logFileName, "r") as logFile:
+            for line in logFile:
                 if line.find("orca killed") != -1:
                     return True
         return False
