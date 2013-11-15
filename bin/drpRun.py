@@ -29,7 +29,11 @@ import pwd
 import re
 import shutil
 import socket
-import sqlite
+try:
+    import sqlite3
+except ImportError:
+    # try external pysqlite package; deprecated
+    import sqlite as sqlite3
 import subprocess
 import sys
 import tempfile
@@ -278,7 +282,7 @@ class RunConfiguration(object):
         _checkReadable(self.registryPath)
 
         if self.options.ccdCount is None:
-            conn = sqlite.connect(self.registryPath)
+            conn = sqlite3.connect(self.registryPath)
             self.options.ccdCount = conn.execute(
                     """SELECT COUNT(DISTINCT visit||':'||raft||':'||sensor)
                     FROM raw;""").fetchone()[0]
