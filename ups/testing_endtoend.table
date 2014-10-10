@@ -1,6 +1,5 @@
 setupRequired(daf_persistence)
 setupOptional(ctrl_orca)
 setupOptional(mysqlpython)
-setupOptional(meas_extensions_multiShapelet)
 
 envAppend(PATH, ${PRODUCT_DIR}/bin)
