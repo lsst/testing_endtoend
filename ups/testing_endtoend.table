@@ -2,4 +2,4 @@ setupRequired(daf_persistence)
 setupOptional(ctrl_orca)
 setupOptional(mysqlpython)
 
-envAppend(PATH, ${PRODUCT_DIR}/bin)
+envPrepend(PATH, ${PRODUCT_DIR}/bin)
