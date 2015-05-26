@@ -1,4 +1,5 @@
 setupRequired(daf_persistence)
+setupRequired(utils)
 setupOptional(ctrl_orca)
 setupOptional(mysqlpython)
 
