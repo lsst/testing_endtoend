@@ -41,13 +41,18 @@ from CrSplit_ImSim import crSplitProcess
 from ImgChar_ImSim import imgCharProcess
 from SFM_ImSim import sfmProcess
 
-import eups
 import lsst.utils
 import lsst.afw.detection as afwDet
 import lsst.afw.math as afwMath
 import lsst.afw.geom as afwGeom
 import lsst.daf.persistence as dafPersist
 from lsst.obs.lsstSim import LsstSimMapper
+
+try:
+    import eups
+except ImportError:
+    print "warning: import of eups failed; tests will be skipped"
+    sys.exit(0)
 
 def cmpFloat(v1, v2, tol=1e-10):
     if v2 == 0.0:
