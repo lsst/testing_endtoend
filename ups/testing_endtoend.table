@@ -1,5 +1,11 @@
-setupRequired(daf_persistence)
+setupRequired(sconsUtils)
 setupRequired(utils)
+setupRequired(daf_persistence)
+setupRequired(afw)
+setupRequired(afwdata)
+setupRequired(obs_lsstSim)
+setupRequired(obs_sdss)
+
 setupOptional(ctrl_orca)
 setupOptional(mysqlpython)
 
