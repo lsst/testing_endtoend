@@ -223,8 +223,6 @@ class EndToEndTestCase(unittest.TestCase):
         if not ok:
             raise ValueError("Couldn't set up version '%s' of astrometry_net_data: %s" % (ver, reason))
 
-        self.assert_(eups.Eups().isSetup("obs_lsstSim"))
-
         afwdataDir = lsst.utils.getPackageDir("afwdata")
         inputRoot = os.path.join(afwdataDir, "ImSim")
         if os.path.exists("endToEnd.py"):
