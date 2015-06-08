@@ -41,12 +41,18 @@ from CrSplit_ImSim import crSplitProcess
 from ImgChar_ImSim import imgCharProcess
 from SFM_ImSim import sfmProcess
 
-import eups
+import lsst.utils
 import lsst.afw.detection as afwDet
 import lsst.afw.math as afwMath
 import lsst.afw.geom as afwGeom
 import lsst.daf.persistence as dafPersist
 from lsst.obs.lsstSim import LsstSimMapper
+
+try:
+    import eups
+except ImportError:
+    print "warning: import of eups failed; tests will be skipped"
+    sys.exit(0)
 
 def cmpFloat(v1, v2, tol=1e-10):
     if v2 == 0.0:
@@ -212,13 +218,13 @@ class EndToEndTestCase(unittest.TestCase):
         #        datarel needs imsim_*.
         ver = 'imsim-2010-12-17-1'
         print "Setting up astrometry_net_data", ver
+        # XXX what is actually used from this setup -- a path in the env?
         ok, version, reason = eups.Eups().setup("astrometry_net_data", versionName=ver)
         if not ok:
             raise ValueError("Couldn't set up version '%s' of astrometry_net_data: %s" % (ver, reason))
 
-        self.assert_(eups.Eups().isSetup("obs_lsstSim"))
-
-        inputRoot = os.path.join(eups.productDir("afwdata"), "ImSim")
+        afwdataDir = lsst.utils.getPackageDir("afwdata")
+        inputRoot = os.path.join(afwdataDir, "ImSim")
         if os.path.exists("endToEnd.py"):
             outputRoot = "."
         else:

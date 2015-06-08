@@ -1,7 +1,5 @@
 # -*- python -*-
 from lsst.sconsUtils import scripts, log
 
-import eups
-
 ignoreList = ["endToEnd.py"]
 scripts.BasicSConscript.tests(ignoreList=ignoreList)
